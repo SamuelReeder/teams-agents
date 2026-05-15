@@ -1,0 +1,12 @@
+{
+  "name": "teams-bot",
+  "version": "1.0.0",
+  "description": "Teams bot that dispatches Claude Code agents",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.21.0"
+  }
+}
