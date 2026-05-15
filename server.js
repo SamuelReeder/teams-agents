@@ -2,7 +2,7 @@ const express = require("express");
 const { PORT, CHAT_ID, POLL_INTERVAL, WORKSPACE_DIR } = require("./lib/config");
 const { sendToTeams, escapeHtml } = require("./lib/teams-io");
 const { pollChannel, pollThreads, getThreads } = require("./lib/threads");
-const { loadPollsFromDisk, tickPolls, getPolls } = require("./lib/polls");
+const { loadPollsFromDisk, getPolls } = require("./lib/polls");
 
 const app = express();
 app.use(express.json());
@@ -82,7 +82,8 @@ app.get("/", (req, res) => {
   </table>
 
   <h2>Commands</h2>
-  <p><code>/poll &lt;interval&gt; &lt;prompt&gt;</code> — start a recurring poll (e.g., <code>/poll 2d check my open PRs</code>)</p>
+  <p><code>/poll &lt;interval&gt; &lt;prompt&gt;</code> — start a recurring poll (e.g., <code>/poll 2d check my open PRs</code>). Expires after 20 runs.</p>
+  <p><code>/poll-restart &lt;id&gt;</code> — restart an expired or cancelled poll</p>
   <p><code>/poll-cancel &lt;id&gt;</code> — cancel a poll</p>
   <p><code>/polls</code> — list active polls</p>
   <p><code>--model &lt;id&gt; --effort &lt;level&gt;</code> — prefix flags passed to Claude CLI</p>
@@ -112,6 +113,5 @@ app.listen(PORT, () => {
 
   setInterval(pollChannel, POLL_INTERVAL);
   setInterval(pollThreads, POLL_INTERVAL + 1000);
-  setInterval(tickPolls, 30000);
   setTimeout(pollChannel, 2000);
 });
