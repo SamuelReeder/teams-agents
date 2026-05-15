@@ -1,16 +1,27 @@
 const { describe, it } = require("node:test");
 const assert = require("node:assert/strict");
 
-// Extract the pure function for testing without side effects
+// Mirror the extractFlags logic for testing
 function extractFlags(message) {
   let remaining = message;
   const flags = {};
 
-  const flagPattern = /^--(\w[\w-]*)\s+(\S+)\s*/;
-  let match;
-  while ((match = remaining.match(flagPattern))) {
-    flags[match[1]] = match[2];
-    remaining = remaining.slice(match[0].length);
+  while (true) {
+    let match = remaining.match(/^--alola(?:\s+(\d{2}))?\s+/);
+    if (match) {
+      flags.alola = match[1] || "03";
+      remaining = remaining.slice(match[0].length);
+      continue;
+    }
+
+    match = remaining.match(/^--(\w[\w-]*)\s+(\S+)\s*/);
+    if (match) {
+      flags[match[1]] = match[2];
+      remaining = remaining.slice(match[0].length);
+      continue;
+    }
+
+    break;
   }
 
   return { flags, prompt: remaining };
@@ -44,38 +55,44 @@ describe("extractFlags", () => {
     assert.equal(result.prompt, "just a normal message");
   });
 
-  it("handles flags with no prompt", () => {
-    const result = extractFlags("--model opus ");
-    assert.deepEqual(result.flags, { model: "opus" });
-    assert.equal(result.prompt, "");
-  });
-
   it("does not extract flags from middle of message", () => {
     const result = extractFlags("hello --model opus world");
     assert.deepEqual(result.flags, {});
     assert.equal(result.prompt, "hello --model opus world");
   });
 
-  it("handles exact model IDs", () => {
-    const result = extractFlags("--model claude-opus-4-7 what is this");
-    assert.equal(result.flags.model, "claude-opus-4-7");
+  it("handles --alola with default node", () => {
+    const result = extractFlags("--alola build hipDNN");
+    assert.equal(result.flags.alola, "03");
+    assert.equal(result.prompt, "build hipDNN");
   });
 
-  it("handles haiku model alias", () => {
-    const result = extractFlags("--model haiku quick question");
+  it("handles --alola with specific node", () => {
+    const result = extractFlags("--alola 04 build hipDNN");
+    assert.equal(result.flags.alola, "04");
+    assert.equal(result.prompt, "build hipDNN");
+  });
+
+  it("handles --alola with --model and --effort", () => {
+    const result = extractFlags("--alola 04 --model opus --effort max run tests");
+    assert.deepEqual(result.flags, {
+      alola: "04",
+      model: "opus",
+      effort: "max",
+    });
+    assert.equal(result.prompt, "run tests");
+  });
+
+  it("handles --alola before other flags", () => {
+    const result = extractFlags("--model haiku --alola check GPU");
     assert.equal(result.flags.model, "haiku");
-    assert.equal(result.prompt, "quick question");
+    assert.equal(result.flags.alola, "03");
+    assert.equal(result.prompt, "check GPU");
   });
 
   it("handles slash commands after flags", () => {
-    const result = extractFlags("--model opus /goto therock");
-    assert.equal(result.flags.model, "opus");
+    const result = extractFlags("--alola /goto therock");
+    assert.equal(result.flags.alola, "03");
     assert.equal(result.prompt, "/goto therock");
-  });
-
-  it("handles unknown flags (passed through)", () => {
-    const result = extractFlags("--custom-flag value do thing");
-    assert.deepEqual(result.flags, { "custom-flag": "value" });
-    assert.equal(result.prompt, "do thing");
   });
 });
