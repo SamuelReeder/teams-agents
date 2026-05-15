@@ -104,13 +104,6 @@ app.listen(PORT, () => {
 
   loadPollsFromDisk();
 
-  sendToTeams(
-    `🤖 <b>Agent Bot Online</b><br><br>` +
-      `Post a message to start a new agent session. Reply in the thread to continue.<br>` +
-      `Use <code>/poll 2d check my PRs</code> to start recurring polls.<br>` +
-      `All workspace commands (<code>/goto</code>, <code>/orchestrate</code>, etc.) are available.`
-  );
-
   setInterval(pollChannel, POLL_INTERVAL);
   setInterval(pollThreads, POLL_INTERVAL + 1000);
   setTimeout(pollChannel, 2000);
