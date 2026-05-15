@@ -2,18 +2,19 @@ const express = require("express");
 const { PORT, CHAT_ID, POLL_INTERVAL, WORKSPACE_DIR } = require("./lib/config");
 const { sendToTeams, escapeHtml } = require("./lib/teams-io");
 const { pollChannel, pollThreads, getThreads } = require("./lib/threads");
-const { buildRoutingContext } = require("./lib/agent-spawn");
+const { loadPollsFromDisk, tickPolls, getPolls } = require("./lib/polls");
 
 const app = express();
 app.use(express.json());
 
 app.get("/", (req, res) => {
   const threads = getThreads();
+  const polls = getPolls();
   const threadList = Array.from(threads.values()).sort(
     (a, b) => b.startTime - a.startTime
   );
 
-  const rows = threadList
+  const threadRows = threadList
     .map((t) => {
       const status = t.busy ? "🔄 Working" : "💤 Idle";
       const age = `${((Date.now() - t.startTime) / 60000).toFixed(0)}m`;
@@ -23,6 +24,22 @@ app.get("/", (req, res) => {
         <td>${escapeHtml(t.from)}</td>
         <td>${t.sessionId.slice(0, 8)}...</td>
         <td>${age}</td>
+      </tr>`;
+    })
+    .join("\n");
+
+  const pollRows = Array.from(polls.values())
+    .map((p) => {
+      const status = p.busy ? "🔄 Running" : "💤 Waiting";
+      const lastRun = p.lastRun
+        ? new Date(p.lastRun).toLocaleString()
+        : "never";
+      return `<tr>
+        <td>${p.id}</td>
+        <td>${status}</td>
+        <td>every ${p.intervalStr}</td>
+        <td>${escapeHtml(p.prompt.slice(0, 80))}</td>
+        <td>${lastRun}</td>
       </tr>`;
     })
     .join("\n");
@@ -41,7 +58,6 @@ app.get("/", (req, res) => {
     tr:nth-child(even) { background: #0f3460; }
     code { background: #16213e; padding: 2px 6px; border-radius: 3px; }
     .info { color: #aaa; }
-    pre { font-size: 12px; white-space: pre-wrap; max-height: 300px; overflow: auto; }
   </style>
 </head>
 <body>
@@ -49,20 +65,27 @@ app.get("/", (req, res) => {
   <p class="info">
     Polling every ${POLL_INTERVAL / 1000}s |
     ${threads.size} active threads |
+    ${polls.size} active polls |
     Workspace: <code>${WORKSPACE_DIR}</code>
   </p>
 
   <h2>Active Threads</h2>
   <table>
     <tr><th>Thread</th><th>Status</th><th>From</th><th>Session</th><th>Age</th></tr>
-    ${rows || "<tr><td colspan=5>No active threads</td></tr>"}
+    ${threadRows || "<tr><td colspan=5>No active threads</td></tr>"}
   </table>
 
-  <h2>How to Use</h2>
-  <p>Post a message in the monitored Teams channel. Each message starts a new agent thread.</p>
-  <p>Reply in the thread to continue the conversation with the same agent session.</p>
-  <p>The agent auto-discovers all workspace commands, skills, and agents from <code>${WORKSPACE_DIR}</code>.</p>
-  <p>Native commands like <code>/goto</code>, <code>/orchestrate</code>, <code>/review-pr</code> work directly.</p>
+  <h2>Active Polls</h2>
+  <table>
+    <tr><th>ID</th><th>Status</th><th>Interval</th><th>Prompt</th><th>Last Run</th></tr>
+    ${pollRows || "<tr><td colspan=5>No active polls</td></tr>"}
+  </table>
+
+  <h2>Commands</h2>
+  <p><code>/poll &lt;interval&gt; &lt;prompt&gt;</code> — start a recurring poll (e.g., <code>/poll 2d check my open PRs</code>)</p>
+  <p><code>/poll-cancel &lt;id&gt;</code> — cancel a poll</p>
+  <p><code>/polls</code> — list active polls</p>
+  <p><code>--model &lt;id&gt; --effort &lt;level&gt;</code> — prefix flags passed to Claude CLI</p>
 </body>
 </html>`);
 });
@@ -78,13 +101,17 @@ app.listen(PORT, () => {
     process.exit(1);
   }
 
+  loadPollsFromDisk();
+
   sendToTeams(
     `🤖 <b>Agent Bot Online</b><br><br>` +
       `Post a message to start a new agent session. Reply in the thread to continue.<br>` +
-      `All workspace commands (<code>/goto</code>, <code>/orchestrate</code>, etc.) and agents are available.`
+      `Use <code>/poll 2d check my PRs</code> to start recurring polls.<br>` +
+      `All workspace commands (<code>/goto</code>, <code>/orchestrate</code>, etc.) are available.`
   );
 
   setInterval(pollChannel, POLL_INTERVAL);
   setInterval(pollThreads, POLL_INTERVAL + 1000);
+  setInterval(tickPolls, 30000);
   setTimeout(pollChannel, 2000);
 });
