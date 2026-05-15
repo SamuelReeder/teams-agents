@@ -1,0 +1,3 @@
+[submodule "workspace"]
+	path = workspace
+	url = git@github.com:SamuelReeder/ROCm-workspace.git
