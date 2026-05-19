@@ -1,31 +1,11 @@
 const { describe, it } = require("node:test");
 const assert = require("node:assert/strict");
-
-// Mirror extractFlags for testing
-function extractFlags(message) {
-  let remaining = message;
-  const flags = {};
-
-  while (true) {
-    let match = remaining.match(/^--alola(?:\s+(\d{2}))?\s+/);
-    if (match) {
-      flags.alola = match[1] || "03";
-      remaining = remaining.slice(match[0].length);
-      continue;
-    }
-
-    match = remaining.match(/^--(\w[\w-]*)\s+(\S+)\s*/);
-    if (match) {
-      flags[match[1]] = match[2];
-      remaining = remaining.slice(match[0].length);
-      continue;
-    }
-
-    break;
-  }
-
-  return { flags, prompt: remaining };
-}
+const {
+  extractFlags,
+  buildAlolaExtraArgs,
+  buildAlolaRemoteCommand,
+} = require("../lib/agent-spawn");
+const { HARNESS_CONFIG } = require("../lib/config");
 
 function alolaContainerName(sessionId) {
   return `claude-${sessionId.slice(0, 8)}`;
@@ -96,31 +76,38 @@ describe("Alola follow-up routing", () => {
 });
 
 describe("Alola remote command construction", () => {
-  it("builds correct remote command with extra args", () => {
-    const ALOLA_RUN_SCRIPT = "~/ROCm-workspace/scripts/run-agent.sh";
-    const containerName = "claude-abc12345";
-    const sessionId = "abc12345-6789-abcd-ef01-234567890abc";
-    const extraArgs = ["--model", "opus"];
+  it("uses configured harness flags for extra args", () => {
+    const threadInfo = { isFollowUp: true };
+    const flags = { model: "opus", effort: "max" };
+    const extraArgs = buildAlolaExtraArgs(threadInfo, flags);
 
-    const remoteCmd = `cd ~/ROCm-workspace && git pull --ff-only -q 2>/dev/null; ${ALOLA_RUN_SCRIPT} ${containerName} ${sessionId} ${extraArgs.join(" ")}`;
+    assert.ok(extraArgs.includes("--resume"));
+
+    if (HARNESS_CONFIG.flags.model) {
+      const modelIndex = extraArgs.indexOf(HARNESS_CONFIG.flags.model);
+      assert.notEqual(modelIndex, -1);
+      assert.equal(extraArgs[modelIndex + 1], "opus");
+    }
+
+    if (HARNESS_CONFIG.flags.effort) {
+      const effortIndex = extraArgs.indexOf(HARNESS_CONFIG.flags.effort);
+      assert.notEqual(effortIndex, -1);
+      assert.equal(extraArgs[effortIndex + 1], "max");
+    }
+  });
+
+  it("quotes remote command arguments", () => {
+    const remoteCmd = buildAlolaRemoteCommand("claude-abc12345", "abc12345", [
+      "--model",
+      "$(touch hacked)",
+      "o'hai",
+    ]);
 
     assert.ok(remoteCmd.includes("git pull"));
     assert.ok(remoteCmd.includes("run-agent.sh"));
-    assert.ok(remoteCmd.includes(containerName));
-    assert.ok(remoteCmd.includes(sessionId));
-    assert.ok(remoteCmd.includes("--model opus"));
-  });
-
-  it("builds remote command with --resume for follow-ups", () => {
-    const extraArgs = ["--resume", "--effort", "max"];
-    const cmd = extraArgs.join(" ");
-    assert.ok(cmd.includes("--resume"));
-    assert.ok(cmd.includes("--effort max"));
-  });
-
-  it("builds remote command with no extra args", () => {
-    const extraArgs = [];
-    const cmd = `run-agent.sh container session ${extraArgs.join(" ")}`.trim();
-    assert.equal(cmd, "run-agent.sh container session");
+    assert.ok(remoteCmd.includes("'claude-abc12345'"));
+    assert.ok(remoteCmd.includes("'abc12345'"));
+    assert.ok(remoteCmd.includes("'$(touch hacked)'"));
+    assert.ok(remoteCmd.includes("'o'\\''hai'"));
   });
 });

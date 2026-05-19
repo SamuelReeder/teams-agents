@@ -2,6 +2,13 @@
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
+if [ -f "$SCRIPT_DIR/.env" ]; then
+    set -a
+    # shellcheck disable=SC1090
+    source "$SCRIPT_DIR/.env"
+    set +a
+fi
+
 echo "=== Teams Agents Launcher ==="
 echo ""
 
@@ -11,12 +18,42 @@ if [ ! -f "$SCRIPT_DIR/workspace/CLAUDE.md" ]; then
     cd "$SCRIPT_DIR" && git submodule update --init --recursive
 fi
 
-# Check Claude CLI
-if ! command -v claude &>/dev/null && [ ! -f "$HOME/.local/bin/claude" ]; then
-    echo "[!] Claude CLI not found"
-    exit 1
-fi
+resolve_harness_bin() {
+    local candidate resolved
+    local home="${HOME:-$(eval echo ~)}"
 
+    for candidate in "${HARNESS_BIN}" "${OH_MY_PI_BIN}" "$home/.local/bin/oh-my-pi" \
+                     "$home/.bun/bin/oh-my-pi" "$home/.bun/bin/omp" \
+                     "$home/.local/bin/omp" "$home/.local/bin/claude" \
+                     "oh-my-pi" "omp" "claude"; do
+        [ -z "$candidate" ] && continue
+        case "$candidate" in
+            ~*) candidate="$home/${candidate#~}" ;;
+        esac
+        if [[ "$candidate" = /* ]]; then
+            if [ -x "$candidate" ]; then
+                resolved="$candidate"
+                break
+            fi
+        else
+            if command -v "$candidate" >/dev/null 2>&1; then
+                resolved="$(command -v "$candidate")"
+                break
+            fi
+        fi
+    done
+
+    if [ -z "$resolved" ]; then
+        echo "[!] Harness binary not found. Set HARNESS_BIN." >&2
+        return 1
+    fi
+
+    echo "$resolved"
+}
+
+# Resolve harness binary
+HARNESS_BIN_RESOLVED="$(resolve_harness_bin)" || exit 1
+export HARNESS_BIN="$HARNESS_BIN_RESOLVED"
 # Check Teams auth
 if ! python3 "$HOME/.claude/skills/m365-teams/scripts/auth.py" --status 2>/dev/null | grep -q "YES"; then
     echo "[!] Teams not authenticated. Run: python3 ~/.claude/skills/m365-teams/scripts/auth.py"

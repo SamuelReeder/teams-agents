@@ -1,31 +1,15 @@
 const { describe, it } = require("node:test");
 const assert = require("node:assert/strict");
+const fs = require("fs");
+const {
+  extractFlags,
+  buildHarnessArgs,
+  prepareHarnessArgs,
+  getProjectDirs,
+} = require("../lib/agent-spawn");
+const { HARNESS_CONFIG, MCP_CONFIG } = require("../lib/config");
 
-// Mirror the extractFlags logic for testing
-function extractFlags(message) {
-  let remaining = message;
-  const flags = {};
-
-  while (true) {
-    let match = remaining.match(/^--alola(?:\s+(\d{2}))?\s+/);
-    if (match) {
-      flags.alola = match[1] || "03";
-      remaining = remaining.slice(match[0].length);
-      continue;
-    }
-
-    match = remaining.match(/^--(\w[\w-]*)\s+(\S+)\s*/);
-    if (match) {
-      flags[match[1]] = match[2];
-      remaining = remaining.slice(match[0].length);
-      continue;
-    }
-
-    break;
-  }
-
-  return { flags, prompt: remaining };
-}
+const projectDirs = getProjectDirs();
 
 describe("extractFlags", () => {
   it("extracts --model flag", () => {
@@ -94,5 +78,131 @@ describe("extractFlags", () => {
     const result = extractFlags("--alola /goto therock");
     assert.equal(result.flags.alola, "03");
     assert.equal(result.prompt, "/goto therock");
+  });
+});
+
+describe("buildHarnessArgs", () => {
+  const promptFlag = HARNESS_CONFIG.flags.prompt;
+  const sessionFlag = HARNESS_CONFIG.flags.sessionId;
+  const resumeFlag = HARNESS_CONFIG.flags.resume;
+
+  it("includes session identifier for new threads", () => {
+    const threadInfo = { sessionId: "session-new", isFollowUp: false };
+    const args = buildHarnessArgs(threadInfo, "do work", {});
+
+    assert.ok(args.includes("do work"), "prompt missing");
+    if (promptFlag) {
+      const promptIndex = args.lastIndexOf(promptFlag);
+      assert.notEqual(promptIndex, -1);
+      assert.equal(args[promptIndex + 1], "do work");
+    }
+    assert.ok(args.includes(threadInfo.sessionId), "session id missing");
+
+    if (sessionFlag) {
+      const index = args.indexOf(sessionFlag);
+      assert.notEqual(index, -1);
+      assert.equal(args[index + 1], threadInfo.sessionId);
+    }
+
+    if (HARNESS_CONFIG.skipPermissions && HARNESS_CONFIG.flags.skipPermissions) {
+      assert.ok(args.includes(HARNESS_CONFIG.flags.skipPermissions));
+    }
+
+    const modelFlag = HARNESS_CONFIG.flags.model;
+    if (HARNESS_CONFIG.defaultModel && modelFlag) {
+      const modelIndex = args.lastIndexOf(modelFlag);
+      assert.notEqual(modelIndex, -1);
+      assert.equal(args[modelIndex + 1], HARNESS_CONFIG.defaultModel);
+      assert.equal(threadInfo.model, HARNESS_CONFIG.defaultModel);
+    } else {
+      assert.strictEqual(threadInfo.model, undefined);
+    }
+  });
+
+  it("uses resume flag for follow-up threads when available", () => {
+    const threadInfo = { sessionId: "session-follow", isFollowUp: true };
+    const args = buildHarnessArgs(threadInfo, "follow up", {});
+
+    assert.ok(args.includes(threadInfo.sessionId), "session id missing");
+
+    if (resumeFlag) {
+      const index = args.indexOf(resumeFlag);
+      assert.notEqual(index, -1);
+      assert.equal(args[index + 1], threadInfo.sessionId);
+    } else if (sessionFlag) {
+      const sessionIndex = args.indexOf(sessionFlag);
+      assert.equal(sessionIndex, -1);
+    }
+    const modelFlag = HARNESS_CONFIG.flags.model;
+    if (HARNESS_CONFIG.defaultModel && modelFlag) {
+      assert.equal(args.indexOf(modelFlag), -1);
+    }
+    assert.strictEqual(threadInfo.model, undefined);
+  });
+  it("reuses stored model for follow-up threads", () => {
+    const modelFlag = HARNESS_CONFIG.flags.model;
+    if (!modelFlag) return;
+
+    const threadInfo = {
+      sessionId: "session-follow-model",
+      isFollowUp: true,
+      model: "stored-model",
+    };
+    const args = buildHarnessArgs(threadInfo, "continue work", {});
+    const index = args.lastIndexOf(modelFlag);
+    assert.notEqual(index, -1);
+    assert.equal(args[index + 1], "stored-model");
+    assert.equal(threadInfo.model, "stored-model");
+  });
+  it("respects explicit model overrides", () => {
+    const modelFlag = HARNESS_CONFIG.flags.model;
+    if (!modelFlag) return;
+
+    const threadInfo = { sessionId: "session-model", isFollowUp: false };
+    const args = buildHarnessArgs(threadInfo, "custom model", { model: "custom-model" });
+
+    const occurrences = [];
+    for (let i = 0; i < args.length; i += 1) {
+      if (args[i] === modelFlag) occurrences.push(i);
+    }
+
+    assert.ok(occurrences.length >= 1);
+    for (const index of occurrences) {
+      assert.equal(args[index + 1], "custom-model");
+    }
+
+    if (HARNESS_CONFIG.defaultModel) {
+      assert.equal(occurrences.length, 1);
+    }
+    assert.equal(threadInfo.model, "custom-model");
+  });
+});
+
+describe("prepareHarnessArgs", () => {
+  const promptFlag = HARNESS_CONFIG.flags.prompt;
+
+  it("inserts workspace context arguments before the prompt", () => {
+    const base = promptFlag ? [promptFlag, "test prompt"] : ["test prompt"];
+    const snapshot = base.slice();
+
+    const prepared = prepareHarnessArgs(base);
+
+    assert.notStrictEqual(prepared, base);
+    assert.deepEqual(base, snapshot);
+
+    const promptIndex = promptFlag ? prepared.lastIndexOf(promptFlag) : prepared.lastIndexOf("test prompt");
+
+    if (HARNESS_CONFIG.flags.mcpConfig && fs.existsSync(MCP_CONFIG)) {
+      const mcpIndex = prepared.indexOf(HARNESS_CONFIG.flags.mcpConfig);
+      if (mcpIndex !== -1) {
+        assert(mcpIndex < promptIndex);
+      }
+    }
+
+    if (HARNESS_CONFIG.flags.addDir && projectDirs.length > 0) {
+      const addDirIndex = prepared.indexOf(HARNESS_CONFIG.flags.addDir);
+      assert.notEqual(addDirIndex, -1);
+      assert(addDirIndex < promptIndex);
+    }
   });
 });

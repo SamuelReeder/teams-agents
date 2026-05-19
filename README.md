@@ -1,6 +1,6 @@
 # Teams Agents
 
-Microsoft Teams bot that dispatches Claude Code agents from a Teams channel. Each message starts a new agent session in a thread; replies in the thread continue the conversation.
+Microsoft Teams bot that dispatches coding-agent harnesses from a Teams channel. By default it launches the Oh My Pi CLI; set `HARNESS_BIN` / `HARNESS_DEFAULT_MODEL` if you want a specific harness or model. Each message starts a new agent session in a thread; replies in the thread continue the conversation.
 
 ## Architecture
 
@@ -9,7 +9,7 @@ teams-agents/              ← infra (this repo)
 ├── server.js              ← Express server, polling, dashboard
 ├── lib/                   ← modules
 │   ├── config.js          ← env, paths, constants
-│   ├── agent-spawn.js     ← Claude CLI process lifecycle
+│   ├── agent-spawn.js     ← harness process lifecycle
 │   ├── teams-io.js        ← Teams messaging via Skype API
 │   └── threads.js         ← thread state, polling loops
 ├── reply.py               ← thread replies via Skype API
@@ -17,15 +17,15 @@ teams-agents/              ← infra (this repo)
 └── workspace/             ← git submodule (domain knowledge)
 ```
 
-The `workspace/` submodule contains all project knowledge, specialist agents, slash commands, skills, and machine configs. Agents spawn with `cwd: workspace/` so Claude Code auto-discovers everything.
+The `workspace/` submodule contains all project knowledge, specialist agents, slash commands, skills, and machine configs. Agents spawn with `cwd: workspace/` so the harness auto-discovers everything.
 
 ## How It Works
 
 1. Server polls a Teams channel every 5s for new messages via the [Skype/Teams internal API](workspace/.claude/skills/m365-teams/)
-2. New message → new Claude Code session (UUID), spawned with full workspace context
-3. Agent runs autonomously (`--dangerously-skip-permissions`, `--print` mode)
+2. New message → new harness session (UUID), spawned with full workspace context
+3. Agent runs autonomously (defaults include `--print`; skip-permissions can be toggled)
 4. Result posted back as a thread reply
-5. Reply in the thread → session resumed with `--resume <uuid>`
+5. Reply in the thread → session resumed with the harness resume flag (default: `--resume <uuid>`)
 
 ## Setup
 
@@ -33,7 +33,7 @@ The `workspace/` submodule contains all project knowledge, specialist agents, sl
 
 - Node.js 18+
 - Python 3.10+
-- [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) installed and authenticated
+- Harness CLI installed (default: Oh My Pi; override by setting `HARNESS_BIN`)
 - Microsoft 365 account (for Teams API)
 
 ### Install
@@ -64,6 +64,16 @@ PORT=3978
 POLL_INTERVAL=5000
 ```
 
+Optional harness overrides (defaults shown):
+
+```bash
+HARNESS_BIN=~/.local/bin/oh-my-pi
+HARNESS_BASE_ARGS="--print"
+HARNESS_SKIP_PERMISSIONS=1
+HARNESS_APPEND_SYSTEM_PROMPT=1
+# HARNESS_DEFAULT_MODEL=openai/gpt-5.5
+```
+
 To find your channel ID:
 
 ```bash
@@ -83,7 +93,7 @@ Dashboard at `http://localhost:3978`.
 
 ## Usage
 
-Post a message in the monitored Teams channel. The bot picks it up and spawns a Claude Code agent.
+Post a message in the monitored Teams channel. The bot picks it up and spawns a harness agent.
 
 ### Free-form messages
 
@@ -139,7 +149,7 @@ To swap in a different workspace for a different domain, replace the submodule.
 Each agent is spawned with:
 
 ```bash
-claude --print \
+$HARNESS_BIN --print \
   --session-id <uuid> \
   --dangerously-skip-permissions \
   --append-system-prompt "<routing context from projects.json>" \

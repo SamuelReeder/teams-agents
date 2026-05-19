@@ -86,7 +86,7 @@ app.get("/", (req, res) => {
   <p><code>/poll-restart &lt;id&gt;</code> — restart an expired or cancelled poll</p>
   <p><code>/poll-cancel &lt;id&gt;</code> — cancel a poll</p>
   <p><code>/polls</code> — list active polls</p>
-  <p><code>--model &lt;id&gt; --effort &lt;level&gt;</code> — prefix flags passed to Claude CLI</p>
+  <p><code>--model &lt;id&gt; --effort &lt;level&gt;</code> — prefix flags passed to the harness</p>
 </body>
 </html>`);
 });
