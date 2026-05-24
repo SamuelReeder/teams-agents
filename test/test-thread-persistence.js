@@ -54,10 +54,10 @@ describe("saveThreadsToDisk", () => {
     assert.equal(entry.model, "anthropic/claude-haiku-4-5");
     assert.deepEqual(entry.alola, { node: "03", containerName: "claude-abc" });
 
+    assert.equal(entry.lastSeen, "test-msg-99", "lastSeen persisted");
     assert.equal(entry.busy, undefined, "transient field busy excluded");
     assert.equal(entry.childPid, undefined, "transient field childPid excluded");
     assert.equal(entry.pending, undefined, "transient field pending excluded");
-    assert.equal(entry.lastSeen, undefined, "transient field lastSeen excluded");
     assert.equal(entry.isFollowUp, undefined, "transient field isFollowUp excluded");
 
     threads.delete("test-root-1");

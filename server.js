@@ -1,6 +1,6 @@
 const express = require("express");
 const { PORT, CHAT_ID, POLL_INTERVAL, WORKSPACE_DIR } = require("./lib/config");
-const { sendToTeams, escapeHtml } = require("./lib/teams-io");
+const { sendToTeams, escapeHtml, loadBotIds } = require("./lib/teams-io");
 const { pollChannel, pollThreads, getThreads, loadThreadsFromDisk } = require("./lib/threads");
 const { loadPollsFromDisk, getPolls } = require("./lib/polls");
 
@@ -102,6 +102,7 @@ app.listen(PORT, () => {
     process.exit(1);
   }
 
+  loadBotIds();
   loadThreadsFromDisk();
   loadPollsFromDisk();
 
