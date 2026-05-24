@@ -1,7 +1,7 @@
 const express = require("express");
 const { PORT, CHAT_ID, POLL_INTERVAL, WORKSPACE_DIR } = require("./lib/config");
 const { sendToTeams, escapeHtml } = require("./lib/teams-io");
-const { pollChannel, pollThreads, getThreads } = require("./lib/threads");
+const { pollChannel, pollThreads, getThreads, loadThreadsFromDisk } = require("./lib/threads");
 const { loadPollsFromDisk, getPolls } = require("./lib/polls");
 
 const app = express();
@@ -86,7 +86,7 @@ app.get("/", (req, res) => {
   <p><code>/poll-restart &lt;id&gt;</code> — restart an expired or cancelled poll</p>
   <p><code>/poll-cancel &lt;id&gt;</code> — cancel a poll</p>
   <p><code>/polls</code> — list active polls</p>
-  <p><code>--model &lt;id&gt; --effort &lt;level&gt;</code> — prefix flags passed to the harness</p>
+  <p><code>--&lt;flag&gt; [value]</code> — prefix harness flags; <code>--alola</code> is reserved for routing</p>
 </body>
 </html>`);
 });
@@ -102,6 +102,7 @@ app.listen(PORT, () => {
     process.exit(1);
   }
 
+  loadThreadsFromDisk();
   loadPollsFromDisk();
 
   setInterval(pollChannel, POLL_INTERVAL);

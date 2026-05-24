@@ -63,7 +63,8 @@ def main():
     parser.add_argument("--json", action="store_true", help="Output as JSON")
     args = parser.parse_args()
 
-    result = send_reply(args.chat_id, args.reply_to, args.message, args.html)
+    message = sys.stdin.read() if args.message == "-" else args.message
+    result = send_reply(args.chat_id, args.reply_to, message, args.html)
 
     if args.json:
         print(json.dumps(result, indent=2))

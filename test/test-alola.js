@@ -34,11 +34,10 @@ describe("Alola flag extraction", () => {
     assert.equal(flags.alola, "04");
   });
 
-  it("--alola combined with --model and --effort", () => {
-    const { flags, prompt } = extractFlags("--alola 04 --model opus --effort max do work");
+  it("--alola reserves routing and forwards harness args", () => {
+    const { flags, harnessArgs, prompt } = extractFlags("--alola 04 --model opus --effort max do work");
     assert.equal(flags.alola, "04");
-    assert.equal(flags.model, "opus");
-    assert.equal(flags.effort, "max");
+    assert.deepEqual(harnessArgs, ["--model", "opus", "--effort", "max"]);
     assert.equal(prompt, "do work");
   });
 
@@ -76,24 +75,37 @@ describe("Alola follow-up routing", () => {
 });
 
 describe("Alola remote command construction", () => {
-  it("uses configured harness flags for extra args", () => {
+  it("appends arbitrary harness args after runner resume flag", () => {
     const threadInfo = { isFollowUp: true };
-    const flags = { model: "opus", effort: "max" };
-    const extraArgs = buildAlolaExtraArgs(threadInfo, flags);
+    const extraArgs = buildAlolaExtraArgs(threadInfo, ["--model", "opus", "--effort", "max"]);
 
-    assert.ok(extraArgs.includes("--resume"));
+    assert.deepEqual(extraArgs, ["--resume", "--model", "opus", "--effort", "max"]);
+  });
 
-    if (HARNESS_CONFIG.flags.model) {
-      const modelIndex = extraArgs.indexOf(HARNESS_CONFIG.flags.model);
-      assert.notEqual(modelIndex, -1);
-      assert.equal(extraArgs[modelIndex + 1], "opus");
-    }
+  it("adds configured Alola default model when missing", () => {
+    const threadInfo = { isFollowUp: false };
+    const extraArgs = buildAlolaExtraArgs(threadInfo, []);
 
-    if (HARNESS_CONFIG.flags.effort) {
-      const effortIndex = extraArgs.indexOf(HARNESS_CONFIG.flags.effort);
-      assert.notEqual(effortIndex, -1);
-      assert.equal(extraArgs[effortIndex + 1], "max");
-    }
+    assert.deepEqual(extraArgs, ["--model", HARNESS_CONFIG.alolaDefaultModel]);
+  });
+
+  it("normalizes provider-prefixed Opus model for Alola", () => {
+    const threadInfo = { isFollowUp: false };
+    const extraArgs = buildAlolaExtraArgs(threadInfo, [
+      "--model",
+      "anthropic/claude-opus-4.7",
+    ]);
+
+    assert.deepEqual(extraArgs, ["--model", "anthropic/claude-opus-4-7"]);
+  });
+
+  it("normalizes dotted Opus model for Alola", () => {
+    const threadInfo = { isFollowUp: false };
+    const extraArgs = buildAlolaExtraArgs(threadInfo, [
+      "--model=claude-opus-4.7",
+    ]);
+
+    assert.deepEqual(extraArgs, ["--model=claude-opus-4-7"]);
   });
 
   it("quotes remote command arguments", () => {

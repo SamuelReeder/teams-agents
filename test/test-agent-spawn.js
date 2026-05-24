@@ -6,77 +6,94 @@ const {
   buildHarnessArgs,
   prepareHarnessArgs,
   getProjectDirs,
+  applyStickyOptions,
+  normalizeBareModel,
 } = require("../lib/agent-spawn");
 const { HARNESS_CONFIG, MCP_CONFIG } = require("../lib/config");
 
 const projectDirs = getProjectDirs();
 
 describe("extractFlags", () => {
-  it("extracts --model flag", () => {
+  it("forwards arbitrary harness flags", () => {
     const result = extractFlags("--model opus hello world");
-    assert.deepEqual(result.flags, { model: "opus" });
+    assert.deepEqual(result.flags, {});
+    assert.deepEqual(result.harnessArgs, ["--model", "opus"]);
     assert.equal(result.prompt, "hello world");
   });
 
-  it("extracts --effort flag", () => {
-    const result = extractFlags("--effort max do something");
-    assert.deepEqual(result.flags, { effort: "max" });
-    assert.equal(result.prompt, "do something");
-  });
-
-  it("extracts both flags", () => {
-    const result = extractFlags("--model claude-sonnet-4-6 --effort high explain this");
-    assert.deepEqual(result.flags, {
-      model: "claude-sonnet-4-6",
-      effort: "high",
-    });
+  it("forwards multiple harness flags without interpreting them", () => {
+    const result = extractFlags("--model claude-sonnet-4-6 --effort high --temperature=0.2 explain this");
+    assert.deepEqual(result.flags, {});
+    assert.deepEqual(result.harnessArgs, [
+      "--model",
+      "claude-sonnet-4-6",
+      "--effort",
+      "high",
+      "--temperature=0.2",
+    ]);
     assert.equal(result.prompt, "explain this");
   });
 
   it("handles no flags", () => {
     const result = extractFlags("just a normal message");
     assert.deepEqual(result.flags, {});
+    assert.deepEqual(result.harnessArgs, []);
     assert.equal(result.prompt, "just a normal message");
   });
 
   it("does not extract flags from middle of message", () => {
     const result = extractFlags("hello --model opus world");
     assert.deepEqual(result.flags, {});
+    assert.deepEqual(result.harnessArgs, []);
     assert.equal(result.prompt, "hello --model opus world");
   });
 
   it("handles --alola with default node", () => {
     const result = extractFlags("--alola build hipDNN");
     assert.equal(result.flags.alola, "03");
+    assert.deepEqual(result.harnessArgs, []);
     assert.equal(result.prompt, "build hipDNN");
   });
 
   it("handles --alola with specific node", () => {
     const result = extractFlags("--alola 04 build hipDNN");
     assert.equal(result.flags.alola, "04");
+    assert.deepEqual(result.harnessArgs, []);
     assert.equal(result.prompt, "build hipDNN");
   });
 
-  it("handles --alola with --model and --effort", () => {
+  it("handles --alola with equals node syntax", () => {
+    const result = extractFlags("--alola=04 build hipDNN");
+    assert.equal(result.flags.alola, "04");
+    assert.deepEqual(result.harnessArgs, []);
+    assert.equal(result.prompt, "build hipDNN");
+  });
+
+  it("reserves --alola while forwarding other flags", () => {
     const result = extractFlags("--alola 04 --model opus --effort max run tests");
-    assert.deepEqual(result.flags, {
-      alola: "04",
-      model: "opus",
-      effort: "max",
-    });
+    assert.deepEqual(result.flags, { alola: "04" });
+    assert.deepEqual(result.harnessArgs, ["--model", "opus", "--effort", "max"]);
     assert.equal(result.prompt, "run tests");
   });
 
-  it("handles --alola before other flags", () => {
+  it("handles harness flags before reserved flags", () => {
     const result = extractFlags("--model haiku --alola check GPU");
-    assert.equal(result.flags.model, "haiku");
+    assert.deepEqual(result.harnessArgs, ["--model", "haiku"]);
     assert.equal(result.flags.alola, "03");
     assert.equal(result.prompt, "check GPU");
   });
 
-  it("handles slash commands after flags", () => {
+  it("uses standalone -- as the end-of-flags delimiter", () => {
+    const result = extractFlags("--verbose -- prompt starts here");
+    assert.deepEqual(result.flags, {});
+    assert.deepEqual(result.harnessArgs, ["--verbose"]);
+    assert.equal(result.prompt, "prompt starts here");
+  });
+
+  it("handles slash commands after reserved flags", () => {
     const result = extractFlags("--alola /goto therock");
     assert.equal(result.flags.alola, "03");
+    assert.deepEqual(result.harnessArgs, []);
     assert.equal(result.prompt, "/goto therock");
   });
 });
@@ -87,8 +104,8 @@ describe("buildHarnessArgs", () => {
   const resumeFlag = HARNESS_CONFIG.flags.resume;
 
   it("includes session identifier for new threads", () => {
-    const threadInfo = { sessionId: "session-new", isFollowUp: false };
-    const args = buildHarnessArgs(threadInfo, "do work", {});
+    const threadInfo = { sessionId: "session-new", isFollowUp: false, rootMessageId: "msg-123" };
+    const args = buildHarnessArgs(threadInfo, "do work", []);
 
     assert.ok(args.includes("do work"), "prompt missing");
     if (promptFlag) {
@@ -96,9 +113,9 @@ describe("buildHarnessArgs", () => {
       assert.notEqual(promptIndex, -1);
       assert.equal(args[promptIndex + 1], "do work");
     }
-    assert.ok(args.includes(threadInfo.sessionId), "session id missing");
 
     if (sessionFlag) {
+      assert.ok(args.includes(threadInfo.sessionId), "session id missing");
       const index = args.indexOf(sessionFlag);
       assert.notEqual(index, -1);
       assert.equal(args[index + 1], threadInfo.sessionId);
@@ -108,73 +125,94 @@ describe("buildHarnessArgs", () => {
       assert.ok(args.includes(HARNESS_CONFIG.flags.skipPermissions));
     }
 
-    const modelFlag = HARNESS_CONFIG.flags.model;
-    if (HARNESS_CONFIG.defaultModel && modelFlag) {
-      const modelIndex = args.lastIndexOf(modelFlag);
+    if (HARNESS_CONFIG.defaultModel && HARNESS_CONFIG.flags.model) {
+      const modelIndex = args.lastIndexOf(HARNESS_CONFIG.flags.model);
       assert.notEqual(modelIndex, -1);
       assert.equal(args[modelIndex + 1], HARNESS_CONFIG.defaultModel);
-      assert.equal(threadInfo.model, HARNESS_CONFIG.defaultModel);
-    } else {
-      assert.strictEqual(threadInfo.model, undefined);
     }
   });
 
   it("uses resume flag for follow-up threads when available", () => {
-    const threadInfo = { sessionId: "session-follow", isFollowUp: true };
-    const args = buildHarnessArgs(threadInfo, "follow up", {});
-
-    assert.ok(args.includes(threadInfo.sessionId), "session id missing");
+    const threadInfo = { sessionId: "session-follow", harnessSessionId: "harness-abc", isFollowUp: true, rootMessageId: "msg-456" };
+    const args = buildHarnessArgs(threadInfo, "follow up", []);
 
     if (resumeFlag) {
+      assert.ok(args.includes(threadInfo.harnessSessionId), "harness session id missing");
       const index = args.indexOf(resumeFlag);
       assert.notEqual(index, -1);
-      assert.equal(args[index + 1], threadInfo.sessionId);
-    } else if (sessionFlag) {
-      const sessionIndex = args.indexOf(sessionFlag);
-      assert.equal(sessionIndex, -1);
+      assert.equal(args[index + 1], threadInfo.harnessSessionId);
     }
-    const modelFlag = HARNESS_CONFIG.flags.model;
-    if (HARNESS_CONFIG.defaultModel && modelFlag) {
-      assert.equal(args.indexOf(modelFlag), -1);
-    }
-    assert.strictEqual(threadInfo.model, undefined);
   });
-  it("reuses stored model for follow-up threads", () => {
-    const modelFlag = HARNESS_CONFIG.flags.model;
-    if (!modelFlag) return;
 
-    const threadInfo = {
-      sessionId: "session-follow-model",
-      isFollowUp: true,
-      model: "stored-model",
-    };
-    const args = buildHarnessArgs(threadInfo, "continue work", {});
-    const index = args.lastIndexOf(modelFlag);
-    assert.notEqual(index, -1);
-    assert.equal(args[index + 1], "stored-model");
-    assert.equal(threadInfo.model, "stored-model");
+  it("passes arbitrary harness args before the prompt", () => {
+    const threadInfo = { sessionId: "session-flags", isFollowUp: false };
+    const args = buildHarnessArgs(threadInfo, "custom prompt", [
+      "--model",
+      "custom-model",
+      "--effort",
+      "max",
+    ]);
+
+    const modelIndex = args.indexOf("--model");
+    const effortIndex = args.indexOf("--effort");
+    const promptIndex = promptFlag ? args.lastIndexOf(promptFlag) : args.lastIndexOf("custom prompt");
+
+    assert.notEqual(modelIndex, -1);
+    assert.equal(args[modelIndex + 1], "custom-model");
+    assert.notEqual(effortIndex, -1);
+    assert.equal(args[effortIndex + 1], "max");
+    assert(modelIndex < promptIndex);
+    assert(effortIndex < promptIndex);
   });
-  it("respects explicit model overrides", () => {
-    const modelFlag = HARNESS_CONFIG.flags.model;
-    if (!modelFlag) return;
+});
 
-    const threadInfo = { sessionId: "session-model", isFollowUp: false };
-    const args = buildHarnessArgs(threadInfo, "custom model", { model: "custom-model" });
+describe("normalizeBareModel", () => {
+  it("prefixes bare gpt model with openai/", () => {
+    assert.equal(normalizeBareModel("gpt-5.5"), "openai/gpt-5.5");
+  });
 
-    const occurrences = [];
-    for (let i = 0; i < args.length; i += 1) {
-      if (args[i] === modelFlag) occurrences.push(i);
-    }
+  it("prefixes bare claude model with anthropic/", () => {
+    assert.equal(normalizeBareModel("claude-haiku-4-5"), "anthropic/claude-haiku-4-5");
+  });
 
-    assert.ok(occurrences.length >= 1);
-    for (const index of occurrences) {
-      assert.equal(args[index + 1], "custom-model");
-    }
+  it("leaves provider-prefixed models alone", () => {
+    assert.equal(normalizeBareModel("openai/gpt-5.5"), "openai/gpt-5.5");
+    assert.equal(normalizeBareModel("anthropic/claude-haiku-4-5"), "anthropic/claude-haiku-4-5");
+  });
 
-    if (HARNESS_CONFIG.defaultModel) {
-      assert.equal(occurrences.length, 1);
-    }
-    assert.equal(threadInfo.model, "custom-model");
+  it("leaves unknown bare models alone", () => {
+    assert.equal(normalizeBareModel("mystery-model"), "mystery-model");
+  });
+});
+
+describe("applyStickyOptions", () => {
+  const modelFlag = HARNESS_CONFIG.flags.model || "--model";
+
+  it("records explicit model on threadInfo and normalizes it", () => {
+    const threadInfo = {};
+    const args = applyStickyOptions(threadInfo, [modelFlag, "gpt-5.5"]);
+    assert.equal(threadInfo.model, "openai/gpt-5.5");
+    assert.deepEqual(args, [modelFlag, "openai/gpt-5.5"]);
+  });
+
+  it("reuses sticky model when no explicit model in args", () => {
+    const threadInfo = { model: "openai/gpt-5.5" };
+    const args = applyStickyOptions(threadInfo, []);
+    assert.deepEqual(args, [modelFlag, "openai/gpt-5.5"]);
+  });
+
+  it("explicit model overrides sticky model and updates it", () => {
+    const threadInfo = { model: "openai/gpt-5.5" };
+    const args = applyStickyOptions(threadInfo, [modelFlag, "anthropic/claude-haiku-4-5"]);
+    assert.equal(threadInfo.model, "anthropic/claude-haiku-4-5");
+    assert.deepEqual(args, [modelFlag, "anthropic/claude-haiku-4-5"]);
+  });
+
+  it("no model anywhere returns args unchanged", () => {
+    const threadInfo = {};
+    const args = applyStickyOptions(threadInfo, ["--thinking", "high"]);
+    assert.deepEqual(args, ["--thinking", "high"]);
+    assert.equal(threadInfo.model, undefined);
   });
 });
 
