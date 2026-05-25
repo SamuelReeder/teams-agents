@@ -144,6 +144,21 @@ describe("buildHarnessArgs", () => {
     }
   });
 
+  it("follow-up without session includes system prompt", () => {
+    const threadInfo = { sessionId: "session-nosid", harnessSessionId: null, isFollowUp: true, rootMessageId: "msg-789" };
+    const args = buildHarnessArgs(threadInfo, "retry this", []);
+
+    if (resumeFlag) {
+      assert.equal(args.indexOf(resumeFlag), -1, "should not use --resume without session id");
+    }
+    if (HARNESS_CONFIG.appendSystemPrompt && HARNESS_CONFIG.flags.appendSystemPrompt) {
+      assert.ok(
+        args.includes(HARNESS_CONFIG.flags.appendSystemPrompt),
+        "system prompt should be included when no session to resume"
+      );
+    }
+  });
+
   it("passes arbitrary harness args before the prompt", () => {
     const threadInfo = { sessionId: "session-flags", isFollowUp: false };
     const args = buildHarnessArgs(threadInfo, "custom prompt", [

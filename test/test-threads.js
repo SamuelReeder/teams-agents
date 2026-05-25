@@ -1,53 +1,68 @@
 const { describe, it } = require("node:test");
 const assert = require("node:assert/strict");
+const { isBotMessage } = require("../lib/teams-io");
+
+function msg(content, from = "Reeder, Samuel") {
+  return { id: "test-" + Math.random(), from, content, messagetype: "RichText/Html" };
+}
 
 describe("Bot message detection", () => {
-  function isBotMessageByContent(text) {
-    if (!text) return true;
-    if (text.startsWith("🚀") || text.startsWith("⏳") || text.startsWith("🤖")) return true;
-    if (text.startsWith("Failed to start agent")) return true;
-    return false;
-  }
-
   it("detects processing message", () => {
-    assert.equal(isBotMessageByContent("🚀 Processing..."), true);
+    assert.equal(isBotMessage(msg("🚀 Processing...")), true);
   });
 
   it("detects waiting message", () => {
-    assert.equal(isBotMessageByContent("⏳ Still working..."), true);
+    assert.equal(isBotMessage(msg("⏳ Still working...")), true);
   });
 
   it("detects online message", () => {
-    assert.equal(isBotMessageByContent("🤖 Agent Bot Online"), true);
+    assert.equal(isBotMessage(msg("🤖 Agent Bot Online")), true);
+  });
+
+  it("detects poll result message", () => {
+    assert.equal(isBotMessage(msg("🔄 Poll: abc123 (every 5m, run 1/20)")), true);
+  });
+
+  it("detects no-output warning", () => {
+    assert.equal(isBotMessage(msg("⚠️ Agent finished with no output (exit 0).")), true);
   });
 
   it("detects spawn error", () => {
-    assert.equal(isBotMessageByContent("Failed to start agent: ENOENT"), true);
+    assert.equal(isBotMessage(msg("Failed to start agent: ENOENT")), true);
   });
 
-  it("does not flag normal messages", () => {
-    assert.equal(isBotMessageByContent("build hipDNN"), false);
-    assert.equal(isBotMessageByContent("/goto therock"), false);
-    assert.equal(isBotMessageByContent("what is the status?"), false);
+  it("detects messages from orgid (Skype API sender)", () => {
+    assert.equal(isBotMessage(msg("Some agent response text", "8:orgid:a82e0ded-b688-4e6e-b792-0831e6d334a9")), true);
   });
 
-  it("flags empty/null as bot message", () => {
-    assert.equal(isBotMessageByContent(""), true);
-    assert.equal(isBotMessageByContent(null), true);
+  it("does not flag normal user messages", () => {
+    assert.equal(isBotMessage(msg("build hipDNN")), false);
+    assert.equal(isBotMessage(msg("/goto therock")), false);
+    assert.equal(isBotMessage(msg("what is the status?")), false);
+  });
+
+  it("flags empty/null content as bot message", () => {
+    assert.equal(isBotMessage(msg("")), true);
+    assert.equal(isBotMessage(msg(null)), true);
   });
 });
 
 describe("Thread command routing", () => {
   function classifyMessage(text) {
+    if (text.trim() === "/poll") return "poll-usage";
     if (text.startsWith("/poll ")) return "poll-create";
     if (text.startsWith("/poll-cancel ")) return "poll-cancel";
     if (text.startsWith("/poll-restart ")) return "poll-restart";
-    if (text.trim() === "/polls") return "poll-list";
+    if (text.trim() === "/polls" || text.trim() === "/polls --all") return "poll-list";
     return "agent";
   }
 
   it("routes /poll command", () => {
     assert.equal(classifyMessage("/poll 2d check PRs"), "poll-create");
+  });
+
+  it("routes bare /poll to usage", () => {
+    assert.equal(classifyMessage("/poll"), "poll-usage");
   });
 
   it("routes /poll-cancel", () => {
@@ -60,6 +75,10 @@ describe("Thread command routing", () => {
 
   it("routes /polls list", () => {
     assert.equal(classifyMessage("/polls"), "poll-list");
+  });
+
+  it("routes /polls --all", () => {
+    assert.equal(classifyMessage("/polls --all"), "poll-list");
   });
 
   it("routes regular messages to agent", () => {
