@@ -3,7 +3,6 @@ node_modules
 npm-debug.log
 .env
 bot-message-ids.json
-channels.json
 polls.json
 threads.json
 sessions
@@ -12,4 +11,6 @@ logs
 secrets
 *.log
 workspace/.git
+workspace/repos
+workspace/worktrees
 workspace/.worktree-sessions.json

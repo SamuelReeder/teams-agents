@@ -100,9 +100,9 @@ describe("Alola flag extraction", () => {
   });
 
   it("preserves slash commands after reserved flags", () => {
-    const { flags, prompt } = extractFlags("--alola /goto therock");
+    const { flags, prompt } = extractFlags("--alola /worktrees");
     assert.equal(flags.alola.mode, "login");
-    assert.equal(prompt, "/goto therock");
+    assert.equal(prompt, "/worktrees");
   });
 });
 

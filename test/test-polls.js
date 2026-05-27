@@ -1,9 +1,8 @@
 const { describe, it } = require("node:test");
 const assert = require("node:assert/strict");
 
-// Test the parse functions directly without loading the full module
-// (which has side effects from requiring config/teams-io)
-// Extract the pure logic inline for testing
+// Parse tests keep pure logic inline to avoid exercising module side effects;
+// channel-isolation tests below load the module and manipulate in-memory state directly.
 
 function parseInterval(str) {
   const match = str.match(/^(\d+)(m|h|d|w)$/);
@@ -82,11 +81,95 @@ describe("parsePollCommand", () => {
   });
 
   it("returns null for non-poll commands", () => {
-    assert.equal(parsePollCommand("/goto therock"), null);
+    assert.equal(parsePollCommand("/worktrees"), null);
     assert.equal(parsePollCommand("hello"), null);
   });
 
   it("returns null for invalid interval unit", () => {
     assert.equal(parsePollCommand("/poll 5s do stuff"), null);
+  });
+});
+
+describe("poll channel isolation", () => {
+  function poll(id, chatId, active) {
+    return {
+      id,
+      chatId,
+      prompt: `${id} prompt`,
+      intervalMs: 3600000,
+      intervalStr: "1h",
+      sessionId: `${id}-session`,
+      from: "Tester",
+      createdAt: new Date("2026-05-20T12:00:00Z").toISOString(),
+      lastRun: null,
+      active,
+      runCount: active ? 1 : 20,
+      maxRuns: 20,
+    };
+  }
+
+  it("filters polls by current channel", () => {
+    const { getPolls, getPollsForChat } = require("../lib/polls");
+    const polls = getPolls();
+    const ids = ["poll-chat-a", "poll-chat-b", "poll-chat-a-old"];
+
+    try {
+      polls.set(ids[0], poll(ids[0], "chat-a", true));
+      polls.set(ids[1], poll(ids[1], "chat-b", true));
+      polls.set(ids[2], poll(ids[2], "chat-a", false));
+
+      assert.deepEqual(getPollsForChat("chat-a").map((p) => p.id), [ids[0]]);
+      assert.deepEqual(getPollsForChat("chat-a", true).map((p) => p.id), [ids[0], ids[2]]);
+      assert.deepEqual(getPollsForChat("chat-b").map((p) => p.id), [ids[1]]);
+    } finally {
+      for (const id of ids) polls.delete(id);
+    }
+  });
+
+  it("does not cancel or restart crons from another channel", () => {
+    const { getPolls, cancelPoll, restartPoll } = require("../lib/polls");
+    const polls = getPolls();
+    const id = "poll-cross-channel-control";
+
+    try {
+      const scoped = poll(id, "chat-a", true);
+      polls.set(id, scoped);
+
+      assert.equal(cancelPoll(`/poll-cancel ${id}`, "chat-b"), false);
+      assert.equal(scoped.active, true, "other channel cannot cancel the cron");
+
+      scoped.active = false;
+      assert.equal(restartPoll(`/poll-restart ${id}`, "reply-id", "chat-b"), false);
+      assert.equal(scoped.active, false, "other channel cannot restart the cron");
+    } finally {
+      polls.delete(id);
+    }
+  });
+
+  it("keeps result-thread lookup scoped by channel", () => {
+    const {
+      getPolls,
+      getPollForResultThread,
+      hasPollResultThread,
+      pollResultThreads,
+      rememberPollResultThread,
+    } = require("../lib/polls");
+    const polls = getPolls();
+    const ids = ["poll-result-chat-a", "poll-result-chat-b"];
+
+    try {
+      polls.set(ids[0], poll(ids[0], "chat-a", true));
+      polls.set(ids[1], poll(ids[1], "chat-b", true));
+      rememberPollResultThread("chat-a", "same-message-id", ids[0]);
+      rememberPollResultThread("chat-b", "same-message-id", ids[1]);
+
+      assert.equal(hasPollResultThread("same-message-id", "chat-a"), true);
+      assert.equal(hasPollResultThread("same-message-id", "chat-b"), true);
+      assert.equal(getPollForResultThread("same-message-id", "chat-a").id, ids[0]);
+      assert.equal(getPollForResultThread("same-message-id", "chat-b").id, ids[1]);
+    } finally {
+      for (const id of ids) polls.delete(id);
+      pollResultThreads.clear();
+    }
   });
 });

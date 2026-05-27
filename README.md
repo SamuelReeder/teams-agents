@@ -185,19 +185,16 @@ Human attach commands are printed by `attach`; sessions are shared with agents w
 
 ## Workspace commands
 
-All slash commands from the workspace are available natively:
+Available workspace slash commands are passed through to the harness:
 
 | Command | Description |
 |---------|-------------|
-| `/goto <project>` | Navigate to a project, load its CLAUDE.md |
-| `/status` | Git status across all projects |
 | `/worktrees` | List or manage worktrees |
-| `/task <action>` | Local issue tracking (beads) |
 | `/orchestrate <JIRA-KEY>` | Full Jira → worktree → implement → PR pipeline |
 | `/review-pr <project>` | Multi-agent code review |
-| `/create-pr` | Push and create a draft PR |
-| `/prep-pr` | Draft PR title and body |
-| `/descriptor <JIRA-KEY>` | Descriptor lowering/lifting orchestration |
+| `/squash-prep [project] [base]` | Suggest squash strategy for clean history |
+
+Available workspace skills are also listed by `!help`; ask for them by name, e.g. `pr-summary` or `hipdnn-superbuild-test`.
 
 ## Agent spawn details
 

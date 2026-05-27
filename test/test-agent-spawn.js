@@ -98,10 +98,10 @@ describe("extractFlags", () => {
   });
 
   it("handles slash commands after reserved flags", () => {
-    const result = extractFlags("--alola /goto therock");
+    const result = extractFlags("--alola /worktrees");
     assert.equal(result.flags.alola.mode, "login");
     assert.deepEqual(result.harnessArgs, []);
-    assert.equal(result.prompt, "/goto therock");
+    assert.equal(result.prompt, "/worktrees");
   });
 
   it("handles ASIC and forced GPU Alola targets", () => {
