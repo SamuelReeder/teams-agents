@@ -8,6 +8,18 @@ const {
   buildAttachCommand,
 } = require("../lib/alola-session");
 
+function maybePushTarget(tokens, token) {
+  if (token.toLowerCase() !== "default") tokens.push(token);
+}
+
+function maybeUnshiftTarget(tokens, token) {
+  if (token.toLowerCase() !== "default") tokens.unshift(token);
+}
+
+function looksLikeTargetContinuation(token) {
+  return /^gfx[0-9][0-9a-z]*$/i.test(token) || /^gpu:/i.test(token);
+}
+
 function usage() {
   return `Usage:
   alola-session run [--target <target>] [--thread <id>] [--timeout-ms <ms>] -- <command>
@@ -38,21 +50,25 @@ function parseArgs(argv) {
     if (arg === "--target" || arg === "-t") {
       i += 1;
       if (i >= argv.length) throw new Error("--target requires a value");
-      opts.target.push(argv[i]);
+      maybePushTarget(opts.target, argv[i]);
       i += 1;
+      if (i < argv.length && looksLikeTargetContinuation(argv[i])) {
+        maybePushTarget(opts.target, argv[i]);
+        i += 1;
+      }
       continue;
     }
     if (arg === "--node") {
       i += 1;
       if (i >= argv.length) throw new Error("--node requires a value");
-      opts.target.unshift(argv[i]);
+      maybeUnshiftTarget(opts.target, argv[i]);
       i += 1;
       continue;
     }
     if (arg === "--asic") {
       i += 1;
       if (i >= argv.length) throw new Error("--asic requires a value");
-      opts.target.push(argv[i]);
+      maybePushTarget(opts.target, argv[i]);
       i += 1;
       continue;
     }

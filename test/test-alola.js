@@ -29,6 +29,13 @@ describe("Alola target parsing", () => {
     assert.equal(target.container, ALOLA_CONFIG.defaultLoginContainer);
   });
 
+  it("accepts explicit default target token", () => {
+    const target = parseAlolaTarget(["default"]);
+    assert.equal(target.mode, "login");
+    assert.equal(target.loginNode, "03");
+    assert.equal(target.asic, "gfx90a");
+  });
+
   it("parses a login-node override", () => {
     const target = parseAlolaTarget(["04"]);
     assert.equal(target.mode, "login");
