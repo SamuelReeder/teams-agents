@@ -10,19 +10,27 @@ RUN apt-get update \
       tini \
     && rm -rf /var/lib/apt/lists/*
 
+ARG APP_USER=sareeder
+ARG APP_UID=1038
+ARG APP_GID=1037
+
 WORKDIR /app
 
 COPY package*.json ./
 RUN npm ci --omit=dev
+RUN groupadd --gid "${APP_GID}" "${APP_USER}" \
+    && useradd --uid "${APP_UID}" --gid "${APP_GID}" --create-home --home-dir "/home/${APP_USER}" --shell /bin/bash "${APP_USER}"
+
 
 COPY . .
 
 RUN mkdir -p /app/state /app/logs /app/secrets \
-    && chown -R node:node /app
+    && chown -R "${APP_UID}:${APP_GID}" /app
 
-USER node
+USER ${APP_USER}
 
 ENV NODE_ENV=production \
+    HOME=/home/${APP_USER} \
     APP_STATE_DIR=/app/state \
     APP_LOG_DIR=/app/logs \
     APP_SECRETS_DIR=/app/secrets \

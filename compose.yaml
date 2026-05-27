@@ -1,11 +1,19 @@
 services:
   teams-bot:
-    build: .
+    # Build the image with the same UID/GID as the HPE account so mounted
+    # home-directory SSH keys keep their normal permissions.
+    build:
+      context: .
+      args:
+        APP_USER: ${APP_USER:-sareeder}
+        APP_UID: ${APP_UID:-1038}
+        APP_GID: ${APP_GID:-1037}
     image: teams-bot:hpe-alola-persistent-sessions
     restart: unless-stopped
     env_file:
       - .env
     environment:
+      HOME: /home/${APP_USER:-sareeder}
       PORT: "3978"
       APP_STATE_DIR: /app/state
       APP_LOG_DIR: /app/logs
@@ -29,6 +37,9 @@ services:
     volumes:
       - teams_state:/app/state
       - teams_logs:/app/logs
+      # Mount the HPE home directory so SSH/Git use the same keys, config, and
+      # known_hosts as the sareeder account on hpe-sjc2-43.
+      - /home/${APP_USER:-sareeder}:/home/${APP_USER:-sareeder}
       - ./secrets/alola_ssh_key:/run/secrets/alola_ssh_key:ro
       # Mount an HPE-local harness install if the image does not provide one.
       # - /opt/oh-my-pi/bin/omp:/usr/local/bin/omp:ro

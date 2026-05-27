@@ -98,7 +98,7 @@ docker compose up -d --build
 docker compose logs -f teams-bot
 ```
 
-Compose mounts durable HPE-local volumes for state/logs and a read-only Alola SSH key. It does not mount the Docker socket, does not run privileged, and does not depend on this WSL checkout. If the harness binary is not installed in the image, mount an HPE-local harness install and set `HARNESS_BIN` accordingly in `.env` or `compose.yaml`.
+Compose builds the image with the HPE account UID/GID (`APP_USER=sareeder`, `APP_UID=1038`, `APP_GID=1037` by default), mounts `/home/sareeder` into the container, and mounts durable HPE-local volumes for state/logs plus the read-only Alola deploy key. That makes SSH/Git see the same home-directory keys and config as the HPE account while keeping the bot independent of this WSL checkout. It does not mount the Docker socket and does not run privileged. If the harness binary is not installed in the image, mount an HPE-local harness install and set `HARNESS_BIN` accordingly in `.env` or `compose.yaml`.
 
 Dashboard: `http://hpe-sjc2-43:3978/`.
 
