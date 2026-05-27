@@ -2,11 +2,11 @@ const { describe, it, beforeEach, afterEach } = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("fs");
 const path = require("path");
-const { ROOT_DIR, THREAD_TTL_MS } = require("../lib/config");
+const { ROOT_DIR, STATE_DIR, THREAD_TTL_MS } = require("../lib/config");
 const { buildSessionMetadata, parseAlolaTarget } = require("../lib/alola-session");
 
-const THREADS_FILE = path.join(ROOT_DIR, "threads.json");
-const SESSIONS_DIR = path.join(ROOT_DIR, "sessions");
+const THREADS_FILE = path.join(STATE_DIR || ROOT_DIR, "threads.json");
+const SESSIONS_DIR = path.join(STATE_DIR || ROOT_DIR, "sessions");
 
 let savedContent = null;
 
