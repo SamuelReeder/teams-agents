@@ -167,10 +167,10 @@ describe("Alola command construction", () => {
   });
 
   it("wraps and parses command sentinels", () => {
-    const script = buildRemoteScript("echo hello", "abc123");
-    assert.ok(script.includes("__CMD_START_abc123__"));
-    assert.ok(script.includes("__CMD_DONE_abc123__"));
-
+    const metadata = buildSessionMetadata({ rootMessageId: "root" }, parseAlolaTarget([]));
+    const sender = buildSendKeysCommand(metadata, "abc123");
+    assert.ok(sender.includes("__CMD_START_abc123__"));
+    assert.ok(sender.includes("__CMD_DONE_abc123__"));
     const parsed = parseCapturedCommand("noise\n__CMD_START_abc123__\nhello\n__CMD_DONE_abc123__:7\n", "abc123");
     assert.equal(parsed.complete, true);
     assert.equal(parsed.rc, 7);
