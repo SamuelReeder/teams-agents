@@ -60,9 +60,15 @@ if ! python3 "$HOME/.claude/skills/m365-teams/scripts/auth.py" --status 2>/dev/n
     exit 1
 fi
 
-# Kill existing server
-kill $(lsof -t -i:3978) 2>/dev/null
-sleep 1
+# Kill existing server only for interactive local launches. Container deployments
+# should use the process manager instead of probing/killing by port.
+if [ "${KILL_EXISTING_SERVER:-1}" = "1" ] && command -v lsof >/dev/null 2>&1; then
+    EXISTING_PIDS="$(lsof -t -i:"${PORT:-3978}" 2>/dev/null || true)"
+    if [ -n "$EXISTING_PIDS" ]; then
+        kill $EXISTING_PIDS 2>/dev/null || true
+        sleep 1
+    fi
+fi
 
 # Start server
 echo "[1/1] Starting server..."

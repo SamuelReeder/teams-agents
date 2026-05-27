@@ -1,2 +1,13 @@
 node_modules/
 .env
+
+# Runtime state/logs/secrets
+bot-message-ids.json
+channels.json
+polls.json
+threads.json
+sessions/
+state/
+logs/
+secrets/
+*.log

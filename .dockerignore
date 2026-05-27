@@ -1,0 +1,15 @@
+.git
+node_modules
+npm-debug.log
+.env
+bot-message-ids.json
+channels.json
+polls.json
+threads.json
+sessions
+state
+logs
+secrets
+*.log
+workspace/.git
+workspace/.worktree-sessions.json

@@ -10,6 +10,7 @@ const {
   normalizeBareModel,
 } = require("../lib/agent-spawn");
 const { HARNESS_CONFIG, MCP_CONFIG } = require("../lib/config");
+const { buildSessionMetadata, parseAlolaTarget } = require("../lib/alola-session");
 
 const projectDirs = getProjectDirs();
 
@@ -48,30 +49,35 @@ describe("extractFlags", () => {
     assert.equal(result.prompt, "hello --model opus world");
   });
 
-  it("handles --alola with default node", () => {
+  it("handles --alola with default login target", () => {
     const result = extractFlags("--alola build hipDNN");
-    assert.equal(result.flags.alola, "03");
+    assert.equal(result.flags.alola.mode, "login");
+    assert.equal(result.flags.alola.loginNode, "03");
+    assert.equal(result.flags.alola.asic, "gfx90a");
     assert.deepEqual(result.harnessArgs, []);
     assert.equal(result.prompt, "build hipDNN");
   });
 
   it("handles --alola with specific node", () => {
     const result = extractFlags("--alola 04 build hipDNN");
-    assert.equal(result.flags.alola, "04");
+    assert.equal(result.flags.alola.mode, "login");
+    assert.equal(result.flags.alola.loginNode, "04");
     assert.deepEqual(result.harnessArgs, []);
     assert.equal(result.prompt, "build hipDNN");
   });
 
   it("handles --alola with equals node syntax", () => {
     const result = extractFlags("--alola=04 build hipDNN");
-    assert.equal(result.flags.alola, "04");
+    assert.equal(result.flags.alola.mode, "login");
+    assert.equal(result.flags.alola.loginNode, "04");
     assert.deepEqual(result.harnessArgs, []);
     assert.equal(result.prompt, "build hipDNN");
   });
 
   it("reserves --alola while forwarding other flags", () => {
     const result = extractFlags("--alola 04 --model opus --effort max run tests");
-    assert.deepEqual(result.flags, { alola: "04" });
+    assert.equal(result.flags.alola.mode, "login");
+    assert.equal(result.flags.alola.loginNode, "04");
     assert.deepEqual(result.harnessArgs, ["--model", "opus", "--effort", "max"]);
     assert.equal(result.prompt, "run tests");
   });
@@ -79,7 +85,8 @@ describe("extractFlags", () => {
   it("handles harness flags before reserved flags", () => {
     const result = extractFlags("--model haiku --alola check GPU");
     assert.deepEqual(result.harnessArgs, ["--model", "haiku"]);
-    assert.equal(result.flags.alola, "03");
+    assert.equal(result.flags.alola.mode, "login");
+    assert.equal(result.flags.alola.loginNode, "03");
     assert.equal(result.prompt, "check GPU");
   });
 
@@ -92,9 +99,21 @@ describe("extractFlags", () => {
 
   it("handles slash commands after reserved flags", () => {
     const result = extractFlags("--alola /goto therock");
-    assert.equal(result.flags.alola, "03");
+    assert.equal(result.flags.alola.mode, "login");
     assert.deepEqual(result.harnessArgs, []);
     assert.equal(result.prompt, "/goto therock");
+  });
+
+  it("handles ASIC and forced GPU Alola targets", () => {
+    const gpu = extractFlags("--alola gfx942 run rocminfo");
+    assert.equal(gpu.flags.alola.mode, "gpu");
+    assert.equal(gpu.flags.alola.asic, "gfx942");
+    assert.equal(gpu.flags.alola.constraint, "MARKHAM&GFX942");
+    assert.equal(gpu.prompt, "run rocminfo");
+
+    const forced = extractFlags("--alola gpu:gfx90a run tests");
+    assert.equal(forced.flags.alola.mode, "gpu");
+    assert.equal(forced.flags.alola.asic, "gfx90a");
   });
 });
 
@@ -178,6 +197,37 @@ describe("buildHarnessArgs", () => {
     assert.equal(args[effortIndex + 1], "max");
     assert(modelIndex < promptIndex);
     assert(effortIndex < promptIndex);
+  });
+
+  it("adds Alola routing context to build/test prompts", () => {
+    const threadInfo = { sessionId: "session-build", isFollowUp: false, rootMessageId: "msg-build" };
+    const args = buildHarnessArgs(threadInfo, "build and test hipDNN", []);
+    const promptIndex = promptFlag ? args.lastIndexOf(promptFlag) : args.length - 1;
+    const prompt = args[promptIndex + (promptFlag ? 1 : 0)];
+    assert.ok(prompt.includes("[Execution routing]"));
+    assert.ok(prompt.includes("workspace/scripts/alola-session run"));
+  });
+
+  it("leaves ordinary prompts as local HPE work", () => {
+    const threadInfo = { sessionId: "session-ordinary", isFollowUp: false, rootMessageId: "msg-ordinary" };
+    const args = buildHarnessArgs(threadInfo, "explain descriptor lifting", []);
+    const promptIndex = promptFlag ? args.lastIndexOf(promptFlag) : args.length - 1;
+    const prompt = args[promptIndex + (promptFlag ? 1 : 0)];
+    assert.equal(prompt, "explain descriptor lifting");
+  });
+
+  it("adds explicit Alola target context without forwarding --alola", () => {
+    const threadInfo = {
+      sessionId: "session-target",
+      isFollowUp: false,
+      rootMessageId: "msg-target",
+      alola: buildSessionMetadata({ rootMessageId: "msg-target", sessionId: "session-target" }, parseAlolaTarget(["gfx942"])),
+    };
+    const args = buildHarnessArgs(threadInfo, "run rocminfo", []);
+    const promptIndex = promptFlag ? args.lastIndexOf(promptFlag) : args.length - 1;
+    const prompt = args[promptIndex + (promptFlag ? 1 : 0)];
+    assert.ok(prompt.includes("Alola GPU gfx942"));
+    assert.equal(args.includes("--alola"), false);
   });
 });
 

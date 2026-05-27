@@ -3,6 +3,7 @@ const assert = require("node:assert/strict");
 const fs = require("fs");
 const path = require("path");
 const { ROOT_DIR, THREAD_TTL_MS } = require("../lib/config");
+const { buildSessionMetadata, parseAlolaTarget } = require("../lib/alola-session");
 
 const THREADS_FILE = path.join(ROOT_DIR, "threads.json");
 const SESSIONS_DIR = path.join(ROOT_DIR, "sessions");
@@ -28,8 +29,13 @@ describe("saveThreadsToDisk", () => {
     const { getThreads, saveThreadsToDisk } = require("../lib/threads");
     const threads = getThreads();
 
+    const alola = buildSessionMetadata(
+      { rootMessageId: "test-root-1", sessionId: "sess-1" },
+      parseAlolaTarget(["03", "gfx942"])
+    );
     threads.set("test-root-1", {
       rootMessageId: "test-root-1",
+      chatId: "test-chat-id",
       sessionId: "sess-1",
       harnessSessionId: "harness-1",
       from: "Test User",
@@ -37,10 +43,11 @@ describe("saveThreadsToDisk", () => {
       isFollowUp: true,
       busy: false,
       lastSeen: "test-msg-99",
+      lastHandledId: "test-handled-42",
       childPid: 12345,
       pending: { text: "queued", from: "user", messageId: "m1" },
       model: "anthropic/claude-haiku-4-5",
-      alola: { node: "03", containerName: "claude-abc" },
+      alola,
     });
 
     saveThreadsToDisk();
@@ -52,8 +59,15 @@ describe("saveThreadsToDisk", () => {
     assert.equal(entry.harnessSessionId, "harness-1");
     assert.equal(entry.from, "Test User");
     assert.equal(entry.model, "anthropic/claude-haiku-4-5");
-    assert.deepEqual(entry.alola, { node: "03", containerName: "claude-abc" });
+    assert.equal(entry.alola.mode, "gpu");
+    assert.equal(entry.alola.loginNode, "03");
+    assert.equal(entry.alola.asic, "gfx942");
+    assert.equal(entry.alola.image, "/cluster/images/hipdnn/hipdnn_latest_gfx942.sqsh");
+    assert.equal(entry.alola.constraint, "MARKHAM&GFX942");
+    assert.ok(entry.alola.tmuxSession);
 
+    assert.equal(entry.chatId, "test-chat-id", "chatId persisted");
+    assert.equal(entry.lastHandledId, "test-handled-42", "lastHandledId persisted");
     assert.equal(entry.lastSeen, "test-msg-99", "lastSeen persisted");
     assert.equal(entry.busy, undefined, "transient field busy excluded");
     assert.equal(entry.childPid, undefined, "transient field childPid excluded");
@@ -72,6 +86,7 @@ describe("loadThreadsFromDisk", () => {
     const testData = [
       {
         rootMessageId: "load-test-1",
+        chatId: "19:test@thread.skype",
         sessionId: "sess-load-1",
         harnessSessionId: "harness-load-1",
         from: "Load User",
@@ -87,6 +102,7 @@ describe("loadThreadsFromDisk", () => {
 
     const restored = threads.get("load-test-1");
     assert.ok(restored, "thread was restored");
+    assert.equal(restored.chatId, "19:test@thread.skype");
     assert.equal(restored.sessionId, "sess-load-1");
     assert.equal(restored.harnessSessionId, "harness-load-1");
     assert.equal(restored.from, "Load User");
@@ -96,6 +112,44 @@ describe("loadThreadsFromDisk", () => {
     assert.equal(restored.childPid, null, "restored threads have no child pid");
 
     threads.delete("load-test-1");
+  });
+
+  it("restores Alola target metadata", () => {
+    const { getThreads, loadThreadsFromDisk } = require("../lib/threads");
+    const threads = getThreads();
+    const alola = buildSessionMetadata(
+      { rootMessageId: "load-alola-1", sessionId: "sess-load-alola" },
+      parseAlolaTarget(["04", "gfx950"])
+    );
+    alola.slurmJobId = "342593";
+
+    const testData = [
+      {
+        rootMessageId: "load-alola-1",
+        chatId: "19:test@thread.skype",
+        sessionId: "sess-load-alola",
+        harnessSessionId: "harness-load-alola",
+        from: "Load User",
+        startTime: new Date().toISOString(),
+        model: "openai/gpt-5.5",
+        alola,
+      },
+    ];
+    fs.writeFileSync(THREADS_FILE, JSON.stringify(testData));
+
+    threads.delete("load-alola-1");
+    loadThreadsFromDisk();
+
+    const restored = threads.get("load-alola-1");
+    assert.ok(restored, "thread was restored");
+    assert.equal(restored.alola.mode, "gpu");
+    assert.equal(restored.alola.loginNode, "04");
+    assert.equal(restored.alola.asic, "gfx950");
+    assert.equal(restored.alola.timeLimit, "08:00:00");
+    assert.equal(restored.alola.slurmJobId, "342593");
+    assert.equal(restored.alola.tmuxSession, alola.tmuxSession);
+
+    threads.delete("load-alola-1");
   });
 
   it("filters out threads older than TTL", () => {
@@ -176,5 +230,33 @@ describe("loadThreadsFromDisk", () => {
     );
 
     threads.delete(threadId);
+  });
+
+  it("defaults chatId to TEAMS_CHAT_ID for pre-migration threads", () => {
+    const { getThreads, loadThreadsFromDisk } = require("../lib/threads");
+    const { CHAT_ID } = require("../lib/config");
+    const threads = getThreads();
+
+    const testData = [
+      {
+        rootMessageId: "migration-test-1",
+        sessionId: "sess-migrate",
+        harnessSessionId: null,
+        from: "User",
+        startTime: new Date().toISOString(),
+        model: null,
+        alola: null,
+      },
+    ];
+    fs.writeFileSync(THREADS_FILE, JSON.stringify(testData));
+
+    threads.delete("migration-test-1");
+    loadThreadsFromDisk();
+
+    const restored = threads.get("migration-test-1");
+    assert.ok(restored, "thread was restored");
+    assert.equal(restored.chatId, CHAT_ID || null, "chatId defaults to CHAT_ID for migration");
+
+    threads.delete("migration-test-1");
   });
 });
