@@ -30,4 +30,9 @@ describe("Docker deployment config", () => {
     assert.equal(entries.includes("workspace/repos"), true);
     assert.equal(entries.includes("workspace/worktrees"), true);
   });
+
+  it("uses the mounted HPE OMP harness by default", () => {
+    const compose = fs.readFileSync(path.join(ROOT_DIR, "compose.yaml"), "utf8");
+    assert.ok(compose.includes("HARNESS_BIN: ${HARNESS_BIN:-/home/${APP_USER:-sareeder}/.local/bin/omp}"));
+  });
 });

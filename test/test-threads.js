@@ -1,11 +1,15 @@
 const { describe, it } = require("node:test");
 const assert = require("node:assert/strict");
-const { isBotMessage } = require("../lib/teams-io");
-const { classifyCommand, isAgentInvocation, commandTextForMessage, buildHelpMessage, listCronTasks, listWorkspaceCommands, listWorkspaceSkills } = require("../lib/threads");
+const { isBotMessage, agentResponseIds } = require("../lib/teams-io");
+const { classifyCommand, isAgentInvocation, commandTextForMessage, agentTextForMessage, collectThreadMessages, buildHelpMessage, listCronTasks, listWorkspaceCommands, listWorkspaceSkills } = require("../lib/threads");
+const { AGENT_PREFIX, loadChannels } = require("../lib/config");
 const { getPolls } = require("../lib/polls");
 
 function msg(content, from = "Reeder, Samuel") {
   return { id: "test-" + Math.random(), from, content, messagetype: "RichText/Html" };
+}
+function threadMsg(id, content, from = "Reeder, Samuel") {
+  return { id, from, content, messagetype: "Text" };
 }
 
 describe("Bot message detection", () => {
@@ -27,6 +31,10 @@ describe("Bot message detection", () => {
 
   it("detects no-output warning", () => {
     assert.equal(isBotMessage(msg("⚠️ Agent finished with no output (exit 0).")), true);
+  });
+
+  it("detects AI-prefixed bot messages", () => {
+    assert.equal(isBotMessage(msg("[AI] Hello.")), true);
   });
 
   it("detects spawn error", () => {
@@ -98,17 +106,15 @@ describe("Teams command routing", () => {
   const prefixedChannel = { chatId: "19:test@thread.skype", prefix: "!agent" };
   const unprefixedChannel = { chatId: "19:test@thread.skype", prefix: null };
 
-  it("recognizes bot commands in unprefixed channels", () => {
+  it("recognizes direct bot commands without the agent prefix", () => {
     assert.equal(commandTextForMessage(unprefixedChannel, "!help"), "!help");
-    assert.equal(classifyCommand(commandTextForMessage(unprefixedChannel, "!help")), "help");
-  });
-
-  it("recognizes bare bot commands in prefixed channels", () => {
     assert.equal(commandTextForMessage(prefixedChannel, "!help"), "!help");
+    assert.equal(commandTextForMessage(prefixedChannel, "!cron-cancel b496fd40"), "!cron-cancel b496fd40");
     assert.equal(classifyCommand(commandTextForMessage(prefixedChannel, "!help")), "help");
+    assert.equal(classifyCommand(commandTextForMessage(prefixedChannel, "!cron-cancel b496fd40")), "cron-cancel");
   });
 
-  it("recognizes bot commands after the agent prefix", () => {
+  it("still recognizes bot commands after the agent prefix", () => {
     assert.equal(isAgentInvocation(prefixedChannel, "!agent !help"), true);
     assert.equal(commandTextForMessage(prefixedChannel, "!agent !help"), "!help");
     assert.equal(classifyCommand(commandTextForMessage(prefixedChannel, "!agent !help")), "help");
@@ -117,6 +123,146 @@ describe("Teams command routing", () => {
   it("does not treat agent requests as bot commands", () => {
     assert.equal(commandTextForMessage(prefixedChannel, "!agent build hipDNN"), null);
     assert.equal(commandTextForMessage(unprefixedChannel, "build hipDNN"), null);
+  });
+
+  it("extracts agent text only when the global prefix is present", () => {
+    assert.equal(agentTextForMessage(prefixedChannel, "!agent build hipDNN"), "build hipDNN");
+    assert.equal(agentTextForMessage(prefixedChannel, "!agent\u00a0build hipDNN"), "build hipDNN");
+    assert.equal(agentTextForMessage(prefixedChannel, "build hipDNN"), null);
+    assert.equal(agentTextForMessage(prefixedChannel, "!agent"), null);
+    assert.equal(agentTextForMessage(unprefixedChannel, "!agent build hipDNN"), "build hipDNN");
+    assert.equal(agentTextForMessage(unprefixedChannel, "build hipDNN"), null);
+  });
+
+  it("does not accept lookalike or missing prefixes", () => {
+    assert.equal(isAgentInvocation(prefixedChannel, "agent hello"), false);
+    assert.equal(isAgentInvocation(prefixedChannel, "!agents hello"), false);
+    assert.equal(isAgentInvocation(prefixedChannel, "!agentic hello"), false);
+    assert.equal(agentTextForMessage(prefixedChannel, "agent hello"), null);
+    assert.equal(agentTextForMessage(prefixedChannel, "!agents hello"), null);
+  });
+
+  it("uses the global agent prefix for every configured channel", () => {
+    const channels = loadChannels();
+    assert.ok(channels.length > 0, "test expects configured Teams channels");
+    for (const channel of channels) {
+      assert.equal(channel.prefix, AGENT_PREFIX);
+    }
+  });
+});
+
+describe("Prefixed thread reply collection", () => {
+  const prefixedChannel = { chatId: "19:test@thread.skype", prefix: "!agent" };
+  const unprefixedChannel = { chatId: "19:open@thread.skype", prefix: null };
+
+  function thread(lastHandledId = "root") {
+    return {
+      chatId: prefixedChannel.chatId,
+      rootMessageId: "root",
+      lastHandledId,
+    };
+  }
+
+  it("ignores unprefixed replies in prefixed channels", () => {
+    const threadInfo = thread();
+    const result = collectThreadMessages(threadInfo, prefixedChannel, [
+      threadMsg("reply-1", "please do not answer"),
+      threadMsg("root", "!agent original request"),
+    ]);
+
+    assert.equal(result, null);
+    assert.equal(threadInfo.lastHandledId, "root");
+  });
+
+  it("does not advance the handled watermark for unprefixed chatter", () => {
+    const threadInfo = thread();
+    const result = collectThreadMessages(threadInfo, prefixedChannel, [
+      threadMsg("reply-2", "more chatter"),
+      threadMsg("reply-1", "please do not answer"),
+      threadMsg("root", "!agent original request"),
+    ]);
+
+    assert.equal(result, null);
+    assert.equal(threadInfo.lastHandledId, "root");
+  });
+
+  it("collects prefixed replies with intervening unprefixed chatter", () => {
+    const threadInfo = thread();
+    const result = collectThreadMessages(threadInfo, prefixedChannel, [
+      threadMsg("reply-2", "!agent please answer this"),
+      threadMsg("reply-1", "team chatter only"),
+      threadMsg("root", "!agent original request"),
+    ]);
+
+    assert.equal(result, "[Reeder, Samuel]: team chatter only\n[Reeder, Samuel]: please answer this");
+    assert.equal(threadInfo.lastHandledId, "reply-2");
+  });
+
+  it("includes multiple unprefixed messages before the triggering agent request", () => {
+    const threadInfo = thread();
+    const result = collectThreadMessages(threadInfo, prefixedChannel, [
+      threadMsg("reply-3", "!agent summarize the thread"),
+      threadMsg("reply-2", "second non-agent context"),
+      threadMsg("reply-1", "first non-agent context"),
+      threadMsg("root", "!agent original request"),
+    ]);
+
+    assert.equal(result, "[Reeder, Samuel]: first non-agent context\n[Reeder, Samuel]: second non-agent context\n[Reeder, Samuel]: summarize the thread");
+    assert.equal(threadInfo.lastHandledId, "reply-3");
+  });
+
+  it("does not feed bot diagnostics back into follow-up prompts", () => {
+    const threadInfo = thread();
+    const result = collectThreadMessages(threadInfo, prefixedChannel, [
+      threadMsg("reply-2", "!agent you there?"),
+      threadMsg("bot-warning", "⚠️ Agent finished with no output (exit 0)."),
+      threadMsg("root", "!agent original request"),
+    ]);
+
+    assert.equal(result, "you there?");
+    assert.equal(threadInfo.lastHandledId, "reply-2");
+  });
+
+  it("includes AI responses as AI context and strips the visible prefix", () => {
+    const threadInfo = thread();
+    agentResponseIds.add("ai-1");
+    try {
+      const result = collectThreadMessages(threadInfo, prefixedChannel, [
+        threadMsg("reply-2", "!agent give a transcript for this thread"),
+        threadMsg("reply-1", "Interesting."),
+        threadMsg("ai-1", "[AI] Hello.", "8:orgid:test-bot"),
+        threadMsg("root", "!agent hello"),
+      ]);
+
+      assert.equal(result, "[AI]: Hello.\n[Reeder, Samuel]: Interesting.\n[Reeder, Samuel]: give a transcript for this thread");
+      assert.equal(threadInfo.lastHandledId, "reply-2");
+    } finally {
+      agentResponseIds.delete("ai-1");
+    }
+  });
+
+  it("allows a bare prefix to trigger on prior unhandled context", () => {
+    const threadInfo = thread();
+    const result = collectThreadMessages(threadInfo, prefixedChannel, [
+      threadMsg("reply-2", "!agent"),
+      threadMsg("reply-1", "Interesting."),
+      threadMsg("root", "!agent hello"),
+    ]);
+
+    assert.equal(result, "Interesting.");
+    assert.equal(threadInfo.lastHandledId, "reply-2");
+  });
+
+  it("uses the global prefix when a channel object omits one", () => {
+    const threadInfo = thread();
+    const result = collectThreadMessages(threadInfo, unprefixedChannel, [
+      threadMsg("reply-2", "!agent continue the work"),
+      threadMsg("reply-1", "additional context"),
+      threadMsg("root", "!agent original request"),
+    ]);
+
+    assert.equal(result, "[Reeder, Samuel]: additional context\n[Reeder, Samuel]: continue the work");
+    assert.equal(threadInfo.lastHandledId, "reply-2");
   });
 });
 
@@ -134,6 +280,8 @@ describe("Teams help content", () => {
       assert.equal(help.includes(`<code>${removed}`), false, `${removed} must not be in help`);
     }
 
+    assert.ok(help.includes("Bot commands below can be sent directly"), "help advertises direct bot commands");
+    assert.equal(help.includes("bot commands with <code>!agent</code>"), false, "help must not require prefix for bot commands");
     assert.ok(help.includes("<b>Skills</b>"), "help has a skills section");
     assert.ok(help.includes("<code>pr-summary</code>"), "help includes pr-summary skill");
     assert.ok(help.includes("<code>/worktrees</code>"), "help includes retained commands");

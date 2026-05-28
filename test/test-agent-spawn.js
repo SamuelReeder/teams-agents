@@ -4,10 +4,12 @@ const fs = require("fs");
 const {
   extractFlags,
   buildHarnessArgs,
+  buildRoutingContext,
   prepareHarnessArgs,
   getProjectDirs,
   applyStickyOptions,
   normalizeBareModel,
+  buildAgentResult,
 } = require("../lib/agent-spawn");
 const { HARNESS_CONFIG, MCP_CONFIG } = require("../lib/config");
 const { buildSessionMetadata, parseAlolaTarget } = require("../lib/alola-session");
@@ -151,6 +153,7 @@ describe("buildHarnessArgs", () => {
     }
   });
 
+
   it("uses resume flag for follow-up threads when available", () => {
     const threadInfo = { sessionId: "session-follow", harnessSessionId: "harness-abc", isFollowUp: true, rootMessageId: "msg-456" };
     const args = buildHarnessArgs(threadInfo, "follow up", []);
@@ -208,6 +211,20 @@ describe("buildHarnessArgs", () => {
     assert.ok(prompt.includes("workspace/scripts/alola-session run"));
   });
 
+  it("tells agents that Alola enroot rootfses are node-local", () => {
+    const context = buildRoutingContext();
+    assert.ok(context.includes("home/project paths"));
+    assert.ok(context.includes("node-local under /var/tmp"));
+
+    const threadInfo = { sessionId: "session-build", isFollowUp: false, rootMessageId: "msg-build" };
+    const args = buildHarnessArgs(threadInfo, "build and test hipDNN", []);
+    const promptIndex = promptFlag ? args.lastIndexOf(promptFlag) : args.length - 1;
+    const prompt = args[promptIndex + (promptFlag ? 1 : 0)];
+    assert.ok(prompt.includes("login-node enroot rootfses"));
+    assert.ok(prompt.includes("node-local under /var/tmp"));
+    assert.ok(prompt.includes("recreate it from the shared image"));
+  });
+
   it("leaves ordinary prompts as local HPE work", () => {
     const threadInfo = { sessionId: "session-ordinary", isFollowUp: false, rootMessageId: "msg-ordinary" };
     const args = buildHarnessArgs(threadInfo, "explain descriptor lifting", []);
@@ -247,6 +264,31 @@ describe("normalizeBareModel", () => {
 
   it("leaves unknown bare models alone", () => {
     assert.equal(normalizeBareModel("mystery-model"), "mystery-model");
+  });
+});
+
+describe("buildAgentResult", () => {
+  it("keeps the existing no-output guidance for new sessions", () => {
+    const { result, resetSession } = buildAgentResult("", "", 0, false);
+
+    assert.equal(resetSession, false);
+    assert.ok(result.includes("Likely a model/gateway issue"));
+  });
+
+  it("resets resumed sessions that exit successfully with no output", () => {
+    const { result, resetSession } = buildAgentResult("", "", 0, true);
+
+    assert.equal(resetSession, true);
+    assert.ok(result.includes("while resuming this thread's saved harness session"));
+    assert.ok(result.includes("I reset the saved session"));
+  });
+
+  it("resets resumed sessions when the harness exits non-zero", () => {
+    const { result, resetSession } = buildAgentResult("", "error: pi-natives:command: syntax error", 2, true);
+
+    assert.equal(resetSession, true);
+    assert.ok(result.includes("pi-natives:command"));
+    assert.ok(result.includes("I reset the saved session"));
   });
 });
 

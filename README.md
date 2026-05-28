@@ -50,9 +50,10 @@ Create `.env` on HPE with Teams and harness settings:
 TEAMS_CHAT_ID=19:your-channel-id@thread.skype
 PORT=3978
 POLL_INTERVAL=5000
-HARNESS_BIN=omp
+HARNESS_BIN=/home/sareeder/.local/bin/omp
 HARNESS_BASE_ARGS="--print"
 HARNESS_SKIP_PERMISSIONS=1
+AGENT_PREFIX=!agent
 HARNESS_APPEND_SYSTEM_PROMPT=1
 ```
 
@@ -62,6 +63,7 @@ Authenticate Teams once on HPE using the mounted/installed m365 Teams skill:
 python3 ~/.claude/skills/m365-teams/scripts/auth.py
 python3 ~/.claude/skills/m365-teams/scripts/auth.py --complete <device_code>
 ```
+
 
 ### SSH key for Alola
 
@@ -89,6 +91,7 @@ ALOLA_SSH_OPTIONS="-o BatchMode=yes -o StrictHostKeyChecking=yes"
 APP_STATE_DIR=/app/state
 APP_LOG_DIR=/app/logs
 APP_SECRETS_DIR=/app/secrets
+AGENT_PREFIX=!agent
 ```
 
 ### Docker Compose
@@ -98,7 +101,7 @@ docker compose up -d --build
 docker compose logs -f teams-bot
 ```
 
-Compose builds the image with the HPE account UID/GID (`APP_USER=sareeder`, `APP_UID=1038`, `APP_GID=1037` by default), mounts `/home/sareeder` into the container, and mounts durable HPE-local volumes for state/logs plus the read-only Alola deploy key. That makes SSH/Git see the same home-directory keys and config as the HPE account while keeping the bot independent of this WSL checkout. It does not mount the Docker socket and does not run privileged. If the harness binary is not installed in the image, mount an HPE-local harness install and set `HARNESS_BIN` accordingly in `.env` or `compose.yaml`.
+Compose builds the image with the HPE account UID/GID (`APP_USER=sareeder`, `APP_UID=1038`, `APP_GID=1037` by default), mounts `/home/sareeder` into the container, and mounts durable HPE-local volumes for state/logs plus the read-only Alola deploy key. That makes SSH/Git, OMP (`/home/sareeder/.local/bin/omp`), and OMP MCP config (`/home/sareeder/.omp/agent/mcp.json`) match the HPE account while keeping the bot independent of this WSL checkout. It does not mount the Docker socket and does not run privileged.
 
 Dashboard: `http://hpe-sjc2-43:3978/`.
 
@@ -145,6 +148,7 @@ Build/test prompts do not require `--alola`; the routing context directs the age
 ```
 
 Follow-up replies preserve the thread target unless a new `--alola ...` flag overrides it. GPU allocations use non-exclusive SLURM jobs with the configured timeout. If an allocation expires before a later prompt, the next command using the same target reacquires a fresh allocation.
+Login nodes `03` and `04` share mounted home/project paths and `/cluster/images/hipdnn` images, but named enroot container rootfses are node-local under `/var/tmp/<uid>/enroot-data`. If a login node lacks `sareeder-latest_container`, recreate it from the shared image (`enroot create -n sareeder-latest_container /cluster/images/hipdnn/hipdnn_latest_gfx90a.sqsh`) and retry instead of permanently routing around that node.
 
 ### Harness flags
 
@@ -196,20 +200,23 @@ Available workspace slash commands are passed through to the harness:
 
 Available workspace skills are also listed by `!help`; ask for them by name, e.g. `pr-summary` or `hipdnn-superbuild-test`.
 
+## Jira MCP
+
+OMP discovers Jira MCP from the mounted HPE home at `~/.omp/agent/mcp.json`; `mcp/mcp-servers.json` is only for non-OMP harnesses that still use `--mcp-config`. If Jira tools return `401 Unauthorized`, refresh the Atlassian token in `~/.omp/agent/mcp.json` and start a new OMP session/container before retrying. A safe credential smoke test is `jira_get_all_projects`; it should return project JSON from `https://amd-hub.atlassian.net`.
+
+
 ## Agent spawn details
 
-Local agents are spawned with:
+Local agents are spawned with OMP defaults like:
 
 ```bash
 $HARNESS_BIN ${HARNESS_BASE_ARGS} \
-  ${HARNESS_SESSION_FLAG:-"--session-id"} <uuid> \
   ${HARNESS_SYSTEM_PROMPT_FLAG:-"--append-system-prompt"} "<HPE/Alola routing context>" \
-  ${HARNESS_SKIP_PERMISSIONS_FLAG:-"--dangerously-skip-permissions"} \
   <forwarded leading -- flags from the Teams message> \
-  ${HARNESS_MCP_FLAG:-"--mcp-config"} mcp/mcp-servers.json \
-  ${HARNESS_ADD_DIR_FLAG:-"--add-dir"} <all project directories> \
   ${HARNESS_PROMPT_FLAG:-"-p"} "<user message>"
 ```
+
+For non-OMP harnesses, `HARNESS_SESSION_FLAG`, `HARNESS_SKIP_PERMISSIONS_FLAG`, `HARNESS_MCP_FLAG`, and `HARNESS_ADD_DIR_FLAG` may also be set.
 
 - `cwd`: `workspace/` so the harness discovers AGENTS/CLAUDE instructions, skills, commands, and agents.
 - State files default under the repo for local runs and under `APP_STATE_DIR` in deployment.

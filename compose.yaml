@@ -30,8 +30,8 @@ services:
       ALOLA_DEFAULT_GPU_TIMEOUT: "08:00:00"
       ALOLA_SSH_KEY: /run/secrets/alola_ssh_key
       ALOLA_SSH_OPTIONS: "-o BatchMode=yes -o StrictHostKeyChecking=yes"
-      # Set HARNESS_BIN to the harness path inside this image or a read-only bind mount.
-      HARNESS_BIN: ${HARNESS_BIN:-omp}
+      # The HPE home mount provides the OMP harness installed for the account.
+      HARNESS_BIN: ${HARNESS_BIN:-/home/${APP_USER:-sareeder}/.local/bin/omp}
     ports:
       - "3978:3978"
     volumes:
@@ -41,8 +41,7 @@ services:
       # known_hosts as the sareeder account on hpe-sjc2-43.
       - /home/${APP_USER:-sareeder}:/home/${APP_USER:-sareeder}
       - ./secrets/alola_ssh_key:/run/secrets/alola_ssh_key:ro
-      # Mount an HPE-local harness install if the image does not provide one.
-      # - /opt/oh-my-pi/bin/omp:/usr/local/bin/omp:ro
+      # The default HARNESS_BIN above uses the OMP install from the mounted HPE home.
     security_opt:
       - no-new-privileges:true
     read_only: false
