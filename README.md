@@ -55,6 +55,8 @@ HARNESS_BASE_ARGS="--print"
 HARNESS_SKIP_PERMISSIONS=1
 AGENT_PREFIX=!agent
 HARNESS_APPEND_SYSTEM_PROMPT=1
+PI_STREAM_FIRST_EVENT_TIMEOUT_MS=600000
+PI_STREAM_IDLE_TIMEOUT_MS=600000
 ```
 
 Authenticate Teams once on HPE using the mounted/installed m365 Teams skill:
@@ -217,6 +219,7 @@ $HARNESS_BIN ${HARNESS_BASE_ARGS} \
 ```
 
 For non-OMP harnesses, `HARNESS_SESSION_FLAG`, `HARNESS_SKIP_PERMISSIONS_FLAG`, `HARNESS_MCP_FLAG`, and `HARNESS_ADD_DIR_FLAG` may also be set.
+- OMP has its own provider stream watchdogs before the bot-level `AGENT_TIMEOUT`: `PI_STREAM_FIRST_EVENT_TIMEOUT_MS` controls how long to wait for the first provider event, and `PI_STREAM_IDLE_TIMEOUT_MS` controls later stream stalls. The compose defaults set both to `600000` ms.
 
 - `cwd`: `workspace/` so the harness discovers AGENTS/CLAUDE instructions, skills, commands, and agents.
 - State files default under the repo for local runs and under `APP_STATE_DIR` in deployment.

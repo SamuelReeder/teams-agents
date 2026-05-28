@@ -32,6 +32,9 @@ services:
       ALOLA_SSH_OPTIONS: "-o BatchMode=yes -o StrictHostKeyChecking=yes"
       # The HPE home mount provides the OMP harness installed for the account.
       HARNESS_BIN: ${HARNESS_BIN:-/home/${APP_USER:-sareeder}/.local/bin/omp}
+      # OMP provider watchdogs; outer bot timeout remains controlled by AGENT_TIMEOUT.
+      PI_STREAM_FIRST_EVENT_TIMEOUT_MS: ${PI_STREAM_FIRST_EVENT_TIMEOUT_MS:-600000}
+      PI_STREAM_IDLE_TIMEOUT_MS: ${PI_STREAM_IDLE_TIMEOUT_MS:-600000}
     ports:
       - "3978:3978"
     volumes:

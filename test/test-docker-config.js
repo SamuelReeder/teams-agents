@@ -34,5 +34,7 @@ describe("Docker deployment config", () => {
   it("uses the mounted HPE OMP harness by default", () => {
     const compose = fs.readFileSync(path.join(ROOT_DIR, "compose.yaml"), "utf8");
     assert.ok(compose.includes("HARNESS_BIN: ${HARNESS_BIN:-/home/${APP_USER:-sareeder}/.local/bin/omp}"));
+    assert.ok(compose.includes("PI_STREAM_FIRST_EVENT_TIMEOUT_MS: ${PI_STREAM_FIRST_EVENT_TIMEOUT_MS:-600000}"));
+    assert.ok(compose.includes("PI_STREAM_IDLE_TIMEOUT_MS: ${PI_STREAM_IDLE_TIMEOUT_MS:-600000}"));
   });
 });

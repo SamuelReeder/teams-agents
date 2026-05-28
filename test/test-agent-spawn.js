@@ -290,6 +290,19 @@ describe("buildAgentResult", () => {
     assert.ok(result.includes("pi-natives:command"));
     assert.ok(result.includes("I reset the saved session"));
   });
+
+  it("preserves resumed sessions on transient provider stream timeouts", () => {
+    const { result, resetSession } = buildAgentResult(
+      "Provider stream timed out while waiting for the first event",
+      "",
+      1,
+      true
+    );
+
+    assert.equal(resetSession, false);
+    assert.ok(result.includes("transient provider stream timeout"));
+    assert.ok(result.includes("preserved this thread's saved harness session"));
+  });
 });
 
 describe("applyStickyOptions", () => {
