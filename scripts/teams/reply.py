@@ -6,7 +6,7 @@ by encoding the original message ID into the conversation ID:
   {channelId};messageid={originalMessageId}
 
 Usage:
-    python3 reply.py --chat-id "19:...@thread.skype" --reply-to "1778857658351" -m "Hello!"
+    python3 scripts/teams/reply.py --chat-id "19:...@thread.skype" --reply-to "1778857658351" -m "Hello!"
 """
 
 import argparse

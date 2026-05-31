@@ -2,6 +2,10 @@
 node_modules
 npm-debug.log
 .env
+.env.*
+!config/env.example
+channels.json
+config/channels.json
 bot-message-ids.json
 polls.json
 threads.json

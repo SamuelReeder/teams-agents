@@ -2,8 +2,8 @@ const { describe, it } = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("fs");
 const path = require("path");
-const { extractFlags } = require("../lib/agent-spawn");
-const { ROOT_DIR, ALOLA_CONFIG } = require("../lib/config");
+const { extractFlags } = require("../../src/agents/spawn");
+const { ROOT_DIR, ALOLA_CONFIG } = require("../../src/config/env");
 const {
   parseAlolaTarget,
   imagePathForAsic,
@@ -18,7 +18,7 @@ const {
   buildRemoteScript,
   parseCapturedCommand,
   sshArgsForNode,
-} = require("../lib/alola-session");
+} = require("../../src/alola/session");
 
 describe("Alola target parsing", () => {
   it("defaults plain --alola to login node 03 and gfx90a", () => {

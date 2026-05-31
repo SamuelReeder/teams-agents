@@ -1,9 +1,9 @@
 const { describe, it } = require("node:test");
 const assert = require("node:assert/strict");
-const { isBotMessage, agentResponseIds } = require("../lib/teams-io");
-const { classifyCommand, isAgentInvocation, commandTextForMessage, agentTextForMessage, collectThreadMessages, buildHelpMessage, listCronTasks, listWorkspaceCommands, listWorkspaceSkills } = require("../lib/threads");
-const { AGENT_PREFIX, loadChannels } = require("../lib/config");
-const { getPolls } = require("../lib/polls");
+const { isBotMessage, agentResponseIds } = require("../../src/teams/io");
+const { classifyCommand, isAgentInvocation, commandTextForMessage, agentTextForMessage, collectThreadMessages, buildHelpMessage, listCronTasks, listWorkspaceCommands, listWorkspaceSkills } = require("../../src/teams/threads");
+const { AGENT_PREFIX, loadChannels } = require("../../src/config/env");
+const { getPolls } = require("../../src/polls/polls");
 
 function msg(content, from = "Reeder, Samuel") {
   return { id: "test-" + Math.random(), from, content, messagetype: "RichText/Html" };

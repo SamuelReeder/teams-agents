@@ -6,8 +6,8 @@ bot-message-ids.json
 channels.json
 polls.json
 threads.json
-sessions/
-state/
-logs/
-secrets/
+/sessions/
+/state/
+/logs/
+/secrets/
 *.log

@@ -1,15 +1,28 @@
 const { randomUUID } = require("crypto");
 const fs = require("fs");
 const path = require("path");
-const { CHAT_ID, MAX_CONCURRENT_AGENTS, ROOT_DIR, STATE_DIR, THREAD_TTL_MS, WORKSPACE_DIR, AGENT_PREFIX, loadChannels } = require("./config");
-const { sendToTeams, stripHtml, escapeHtml, isBotMessage, isAgentResponse, fetchMessages, AI_PREFIX } = require("./teams-io");
-const { spawnAgent, finalizeSession, threadSessionDir } = require("./agent-spawn");
-const { coerceAlolaMetadata } = require("./alola-session");
-const { createPoll, cancelPoll, restartPoll, getPollForResultThread, getPollsForChat, hasPollResultThread } = require("./polls");
+const {
+  CHAT_ID,
+  MAX_CONCURRENT_AGENTS,
+  ROOT_DIR,
+  STATE_DIR,
+  THREAD_TTL_MS,
+  AGENT_PREFIX,
+  ALOLA_SESSION_BIN,
+  loadChannels,
+  resolveWorkspace,
+  workspaceFromPersisted,
+  attachWorkspace,
+  channelMaxConcurrentAgents,
+  channelDefaultModel,
+  channelAlolaDefaultModel,
+} = require("../config/env");
+const { sendToTeams, stripHtml, escapeHtml, isBotMessage, isAgentResponse, fetchMessages, AI_PREFIX } = require("./io");
+const { spawnAgent, finalizeSession, existingThreadSessionDir } = require("../agents/spawn");
+const { coerceAlolaMetadata } = require("../alola/session");
+const { createPoll, cancelPoll, restartPoll, getPollForResultThread, getPollsForChat, hasPollResultThread } = require("../polls/polls");
 
 const THREADS_FILE = path.join(STATE_DIR || ROOT_DIR, "threads.json");
-const COMMANDS_DIR = path.join(WORKSPACE_DIR, ".claude/commands");
-const SKILLS_DIR = path.join(WORKSPACE_DIR, ".shared/skills");
 
 const threads = new Map();
 const processedMessageIds = new Set();
@@ -23,14 +36,56 @@ function processedMessageKey(chatId, messageId) {
   return `${chatId || CHAT_ID || "default"}::${messageId}`;
 }
 
+function getChannelConfig(chatId) {
+  const channels = loadChannels();
+  return channels.find((ch) => ch.chatId === chatId) || null;
+}
+
+function fallbackChannel(chatId) {
+  return getChannelConfig(chatId) || {
+    chatId: chatId || CHAT_ID || null,
+    label: chatId || "Default",
+    prefix: AGENT_PREFIX,
+    defaultModel: null,
+    alolaDefaultModel: null,
+    workspace: null,
+    maxConcurrentAgents: null,
+  };
+}
+
+function workspaceForChannel(channel) {
+  if (channel?.resolvedWorkspace) return channel.resolvedWorkspace;
+  const workspace = resolveWorkspace(channel || null);
+  if (channel) channel.resolvedWorkspace = workspace;
+  return workspace;
+}
+
+function workspaceForPersistedThread(record, chatId) {
+  if (record.workspaceDir) return workspaceFromPersisted(record.workspaceId, record.workspaceDir, record.workspaceSource || "persisted");
+  return resolveWorkspace(fallbackChannel(chatId));
+}
+
+function applyChannelDefaults(threadInfo, channel) {
+  const ch = channel || fallbackChannel(threadInfo.chatId);
+  if (!threadInfo.defaultModel) threadInfo.defaultModel = channelDefaultModel(ch);
+  if (!threadInfo.alolaDefaultModel) threadInfo.alolaDefaultModel = channelAlolaDefaultModel(ch);
+  if (!threadInfo.maxConcurrentAgents) threadInfo.maxConcurrentAgents = channelMaxConcurrentAgents(ch);
+  if (!threadInfo.workspaceDir) attachWorkspace(threadInfo, workspaceForChannel(ch));
+  return threadInfo;
+}
+
 function saveThreadsToDisk() {
   const data = [];
   for (const [key, t] of threads) {
+    if (!t.workspaceDir) applyChannelDefaults(t, fallbackChannel(t.chatId));
     const alola = coerceAlolaMetadata(t.alola, t);
     data.push({
       mapKey: key !== t.rootMessageId ? key : undefined,
       rootMessageId: t.rootMessageId,
       chatId: t.chatId || null,
+      workspaceId: t.workspaceId || null,
+      workspaceDir: t.workspaceDir || null,
+      workspaceSource: t.workspaceSource || null,
       sessionId: t.sessionId,
       harnessSessionId: t.harnessSessionId || null,
       from: t.from,
@@ -38,6 +93,9 @@ function saveThreadsToDisk() {
       lastSeen: t.lastSeen || null,
       lastHandledId: t.lastHandledId || null,
       model: t.model || null,
+      defaultModel: t.defaultModel || null,
+      alolaDefaultModel: t.alolaDefaultModel || null,
+      maxConcurrentAgents: t.maxConcurrentAgents || null,
       alola: alola || null,
     });
   }
@@ -54,16 +112,18 @@ function loadThreadsFromDisk() {
       const age = now - new Date(t.startTime).getTime();
       if (age > THREAD_TTL_MS) continue;
 
+      const chatId = t.chatId || CHAT_ID || null;
+      const channel = fallbackChannel(chatId);
+      const workspace = workspaceForPersistedThread(t, chatId);
       let harnessSessionId = t.harnessSessionId;
       if (!harnessSessionId) {
         try {
-          harnessSessionId = finalizeSession(threadSessionDir(t.rootMessageId)) || null;
+          harnessSessionId = finalizeSession(existingThreadSessionDir(t.rootMessageId, workspace)) || null;
         } catch {}
       }
 
-      const chatId = t.chatId || CHAT_ID || null;
       const mapKey = t.mapKey || threadKey(chatId, t.rootMessageId);
-      const restoredThread = {
+      const restoredThread = attachWorkspace({
         rootMessageId: t.rootMessageId,
         chatId,
         sessionId: t.sessionId,
@@ -76,13 +136,15 @@ function loadThreadsFromDisk() {
         lastHandledId: t.lastHandledId || t.lastSeen || null,
         childPid: null,
         model: t.model || undefined,
+        defaultModel: t.defaultModel || channelDefaultModel(channel),
+        alolaDefaultModel: t.alolaDefaultModel || channelAlolaDefaultModel(channel),
+        maxConcurrentAgents: t.maxConcurrentAgents || channelMaxConcurrentAgents(channel),
         alola: undefined,
-      };
+      }, workspace);
       restoredThread.alola = coerceAlolaMetadata(t.alola, restoredThread) || undefined;
       threads.set(mapKey, restoredThread);
 
       processedMessageIds.add(processedMessageKey(restoredThread.chatId, restoredThread.rootMessageId));
-
       restored++;
     }
     console.log(`[Threads] Restored ${restored} threads from disk`);
@@ -116,13 +178,21 @@ function frontmatterField(content, field) {
   return value;
 }
 
-function listWorkspaceCommands() {
+function resolveWorkspaceInput(input) {
+  if (input?.dir) return input;
+  if (input?.chatId || input?.workspace !== undefined) return workspaceForChannel(input);
+  return resolveWorkspace();
+}
+
+function listWorkspaceCommands(input = null) {
   try {
-    return fs.readdirSync(COMMANDS_DIR, { withFileTypes: true })
+    const workspace = resolveWorkspaceInput(input);
+    const commandsDir = path.join(workspace.dir, ".claude/commands");
+    return fs.readdirSync(commandsDir, { withFileTypes: true })
       .filter((entry) => entry.isFile() && entry.name.endsWith(".md"))
       .map((entry) => {
         const name = entry.name.slice(0, -3);
-        const content = fs.readFileSync(path.join(COMMANDS_DIR, entry.name), "utf8");
+        const content = fs.readFileSync(path.join(commandsDir, entry.name), "utf8");
         return {
           name,
           description: frontmatterField(content, "description") || "Workspace command",
@@ -134,12 +204,14 @@ function listWorkspaceCommands() {
   }
 }
 
-function listWorkspaceSkills() {
+function listWorkspaceSkills(input = null) {
   try {
-    return fs.readdirSync(SKILLS_DIR, { withFileTypes: true })
+    const workspace = resolveWorkspaceInput(input);
+    const skillsDir = path.join(workspace.dir, ".shared/skills");
+    return fs.readdirSync(skillsDir, { withFileTypes: true })
       .filter((entry) => entry.isDirectory())
       .map((entry) => {
-        const content = fs.readFileSync(path.join(SKILLS_DIR, entry.name, "SKILL.md"), "utf8");
+        const content = fs.readFileSync(path.join(skillsDir, entry.name, "SKILL.md"), "utf8");
         return {
           name: frontmatterField(content, "name") || entry.name,
           description: frontmatterField(content, "description") || "Workspace skill",
@@ -159,20 +231,27 @@ function helpEntriesHtml(entries, codePrefix = "") {
 }
 
 function buildHelpMessage(channel) {
-  const prefix = channel.prefix || AGENT_PREFIX;
+  const prefix = channelPrefix(channel);
+  const workspace = (() => {
+    try { return workspaceForChannel(channel); } catch { return null; }
+  })();
   const prefixNote = prefix
     ? `Prefix agent requests and thread replies with <code>${escapeHtml(prefix)}</code>. Bot commands below can be sent directly.<br><br>`
     : `Post a message to start a new agent session. Reply in a thread to continue the conversation. Bot commands below can be sent directly.<br><br>`;
   const examplePrefix = prefix ? `${prefix} ` : "";
+  const workspaceLine = workspace
+    ? `<b>Workspace</b>: <code>${escapeHtml(workspace.dir)}</code><br><br>`
+    : "";
 
   return `<b>Teams Agents</b><br><br>` +
     prefixNote +
+    workspaceLine +
     `<b>Flags</b> (prefix your message):<br>` +
-    `<code>--alola</code> — keep the agent on HPE, target the default Alola login session (node 03, gfx90a)<br>` +
+    `<code>--alola</code> — keep the agent on the controller host, target the default Alola login session (node ${escapeHtml(require("../config/env").ALOLA_CONFIG.defaultLoginNode)}, ${escapeHtml(require("../config/env").ALOLA_CONFIG.defaultAsic)})<br>` +
     `<code>--alola 04</code>, <code>--alola gfx942</code>, <code>--alola 03 gfx950</code>, <code>--alola gpu:gfx90a</code> — select login node or non-exclusive GPU allocation<br>` +
     `<code>--&lt;flag&gt; [value]</code> — forwarded verbatim to the harness before the prompt<br>` +
     `<code>--</code> — end harness flags, useful before prompts that start with dashes<br><br>` +
-    `<b>Execution</b>: agents run locally on HPE by default. ROCm builds/tests/benchmarks, CMake/Ninja/ctest, provider verification, hipcc, rocminfo, and GPU work should use durable Alola sessions through <code>workspace/scripts/alola-session</code>.<br><br>` +
+    `<b>Execution</b>: agents run locally in the selected workspace. ROCm builds/tests/benchmarks, CMake/Ninja/ctest, provider verification, hipcc, rocminfo, and GPU work should use durable Alola sessions through <code>${escapeHtml(ALOLA_SESSION_BIN)}</code>.<br><br>` +
     `<b>Commands</b>:<br>` +
     `<code>!help</code> — this message<br>` +
     `<code>!models [filter]</code> — list available models (e.g. <code>!models haiku</code>)<br>` +
@@ -181,11 +260,11 @@ function buildHelpMessage(channel) {
     `<code>!cron-restart &lt;id&gt;</code> — restart an expired recurring task<br>` +
     `<code>!crons</code> — list this channel's active recurring tasks (<code>!crons --all</code> includes cancelled/expired)<br><br>` +
     `<b>Workspace commands</b> (passed to the harness):<br>` +
-    helpEntriesHtml(listWorkspaceCommands(), "/") +
+    helpEntriesHtml(listWorkspaceCommands(workspace || channel), "/") +
     `<br><b>Skills</b> (ask for them by name):<br>` +
-    helpEntriesHtml(listWorkspaceSkills()) +
+    helpEntriesHtml(listWorkspaceSkills(workspace || channel)) +
     `<br><b>Examples</b>:<br>` +
-    `<code>${escapeHtml(examplePrefix)}Build hipDNN in the consumption worktree</code> — agent uses the default Alola login session for build work<br>` +
+    `<code>${escapeHtml(examplePrefix)}Build hipDNN in the relevant worktree</code> — agent uses the default Alola login session for build work<br>` +
     `<code>${escapeHtml(examplePrefix)}--alola gfx942 run rocminfo and verify the MI300 path</code><br>` +
     `<code>${escapeHtml(examplePrefix)}--model opus explain the hipDNN provider architecture</code><br>` +
     `<code>!cron 1d check CI status on my open PRs</code>`;
@@ -217,14 +296,13 @@ function handleCommand(channel, text, from, replyToId) {
 
   if (kind === "models") {
     const { execSync } = require("child_process");
-    const { HARNESS_BIN } = require("./config");
+    const { HARNESS_BIN } = require("../config/env");
     const search = text.trim() === "!models" ? "" : text.slice("!models ".length).trim();
     try {
       const out = execSync(`${HARNESS_BIN} --list-models=${search}`, {
         timeout: 30000,
         stdio: ["ignore", "pipe", "pipe"],
       }).toString();
-      // Compact: drop blank lines, keep first ~60 rows
       const lines = out.split("\n").filter((l) => l.trim()).slice(0, 80);
       const filterNote = search ? ` (filter: <code>${search}</code>)` : "";
       sendToTeams(chatId,
@@ -248,8 +326,7 @@ function handleCommand(channel, text, from, replyToId) {
   }
 
   if (kind === "cron-create") {
-    // polls.js expects `/poll <args>` format internally
-    createPoll(chatId, "/poll " + text.slice("!cron ".length), from, replyToId);
+    createPoll(channel, "/poll " + text.slice("!cron ".length), from, replyToId);
     return true;
   }
 
@@ -295,8 +372,8 @@ function handleNewThread(channel, text, from, messageId) {
   if (!text || !messageId) return;
 
   processedMessageIds.add(processedMessageKey(chatId, messageId));
-
-  const threadInfo = {
+  const workspace = workspaceForChannel(channel);
+  const threadInfo = attachWorkspace({
     rootMessageId: messageId,
     chatId,
     sessionId: randomUUID(),
@@ -307,19 +384,17 @@ function handleNewThread(channel, text, from, messageId) {
     lastSeen: messageId,
     lastHandledId: messageId,
     childPid: null,
-  };
+    defaultModel: channelDefaultModel(channel),
+    alolaDefaultModel: channelAlolaDefaultModel(channel),
+    maxConcurrentAgents: channelMaxConcurrentAgents(channel),
+  }, workspace);
 
   threads.set(threadKey(chatId, messageId), threadInfo);
   saveThreadsToDisk();
-  console.log(`[Thread ${messageId}] New session ${threadInfo.sessionId.slice(0, 8)}... from ${from}`);
+  console.log(`[Thread ${messageId}] New session ${threadInfo.sessionId.slice(0, 8)}... from ${from} workspace=${workspace.id}`);
 
   sendToTeams(chatId, `${AI_PREFIX} 🚀 Processing...`, messageId);
-  spawnAgent(threadInfo, text, messageId, MAX_CONCURRENT_AGENTS);
-}
-
-function getChannelConfig(chatId) {
-  const channels = loadChannels();
-  return channels.find((ch) => ch.chatId === chatId) || null;
+  spawnAgent(threadInfo, text, messageId, threadInfo.maxConcurrentAgents || MAX_CONCURRENT_AGENTS);
 }
 
 function stripAiPrefix(text) {
@@ -346,7 +421,6 @@ function collectThreadMessages(threadInfo, channel, messages) {
     }
   }
   if (startAfter === -1) {
-    // Fall back to the most recent agent response as the watermark
     for (let i = chronological.length - 1; i >= 0; i--) {
       if (isAgentResponse(chronological[i])) {
         startAfter = i;
@@ -386,7 +460,6 @@ function collectThreadMessages(threadInfo, channel, messages) {
     lastHandledId = msg.id;
   }
 
-  // Only spawn on an explicit agent invocation; intervening chatter is context, not a trigger.
   if (!hasAgentInvocation || collected.length === 0) return null;
 
   threadInfo.lastHandledId = lastHandledId || collected[collected.length - 1].id;
@@ -397,7 +470,8 @@ function collectThreadMessages(threadInfo, channel, messages) {
 
 function gatherThreadMessages(threadInfo) {
   if (!threadInfo.chatId) return null;
-  const channel = getChannelConfig(threadInfo.chatId);
+  const channel = fallbackChannel(threadInfo.chatId);
+  applyChannelDefaults(threadInfo, channel);
   const rootId = threadInfo.rootMessageId;
   const threadConvId = `${threadInfo.chatId};messageid=${rootId}`;
   const messages = fetchMessages(threadConvId, 50);
@@ -405,6 +479,8 @@ function gatherThreadMessages(threadInfo) {
 }
 
 function handleThreadReply(threadInfo) {
+  const channel = fallbackChannel(threadInfo.chatId);
+  applyChannelDefaults(threadInfo, channel);
   if (threadInfo.busy) {
     threadInfo.hasPending = true;
     sendToTeams(threadInfo.chatId, `${AI_PREFIX} 🚀 Processing... (queued after current run)`, threadInfo.rootMessageId);
@@ -420,7 +496,7 @@ function handleThreadReply(threadInfo) {
 
   sendToTeams(threadInfo.chatId, `${AI_PREFIX} 🚀 Processing...`, threadInfo.rootMessageId);
   console.log(`[Thread ${threadInfo.rootMessageId}] Follow-up: "${text.slice(0, 80)}"`);
-  spawnAgent(threadInfo, text, threadInfo.rootMessageId, MAX_CONCURRENT_AGENTS);
+  spawnAgent(threadInfo, text, threadInfo.rootMessageId, threadInfo.maxConcurrentAgents || channelMaxConcurrentAgents(channel));
 }
 
 function handlePollResultReply(poll, from, messageId, rootMessageId) {
@@ -429,7 +505,10 @@ function handlePollResultReply(poll, from, messageId, rootMessageId) {
   processedMessageIds.add(processedMessageKey(chatId, messageId));
 
   if (!threads.has(key)) {
-    threads.set(key, {
+    const workspace = poll.workspaceDir
+      ? workspaceFromPersisted(poll.workspaceId, poll.workspaceDir, poll.workspaceSource || "poll")
+      : resolveWorkspace(fallbackChannel(chatId));
+    threads.set(key, attachWorkspace({
       rootMessageId,
       chatId,
       sessionId: poll.sessionId,
@@ -440,7 +519,11 @@ function handlePollResultReply(poll, from, messageId, rootMessageId) {
       busy: false,
       lastSeen: messageId,
       childPid: null,
-    });
+      model: poll.model || undefined,
+      defaultModel: poll.defaultModel || undefined,
+      alolaDefaultModel: poll.alolaDefaultModel || undefined,
+      maxConcurrentAgents: poll.maxConcurrentAgents || undefined,
+    }, workspace));
     saveThreadsToDisk();
   }
 
@@ -462,6 +545,12 @@ function agentTextForMessage(channel, text) {
 
 function pollSingleChannel(channel) {
   const { chatId } = channel;
+  try {
+    workspaceForChannel(channel);
+  } catch (err) {
+    console.error(`[Poll] Channel ${channel.label || chatId} disabled: ${err.message}`);
+    return;
+  }
   const messages = fetchMessages(chatId, 10);
   if (messages.length === 0) return;
 
@@ -502,7 +591,6 @@ function pollSingleChannel(channel) {
       const replyTarget = isReply ? rootId : msg.id;
       const key = threadKey(chatId, rootId);
 
-      // Bot commands are handled directly; the agent prefix remains valid for compatibility.
       const commandText = commandTextForMessage(channel, text);
       if (commandText && handleCommand(channel, commandText, from, replyTarget)) {
         console.log(`[Poll] Handled command "${commandText.slice(0, 40)}" in ${channel.label}`);
@@ -512,7 +600,6 @@ function pollSingleChannel(channel) {
       const agentText = agentTextForMessage(channel, text);
       const agentInvoked = isAgentInvocation(channel, text);
 
-      // Poll result thread routing (replies to bot's poll results)
       if (isReply && hasPollResultThread(rootId, chatId)) {
         if (!agentInvoked) {
           console.log(`[Poll] Ignoring poll-result reply in ${channel.label} without ${channel.prefix} prefix`);
@@ -526,24 +613,23 @@ function pollSingleChannel(channel) {
         }
       }
 
-      // Existing thread reply
       if (isReply && threads.has(key)) {
         if (!agentInvoked) {
           console.log(`[Poll] Ignoring reply to thread ${rootId} in ${channel.label} without ${channel.prefix} prefix`);
           continue;
         }
         const threadInfo = threads.get(key);
+        applyChannelDefaults(threadInfo, channel);
         console.log(`[Poll] Routing reply to thread ${rootId}: "${text.slice(0, 60)}"`);
         threadInfo.lastSeen = msg.id;
         handleThreadReply(threadInfo);
         continue;
       }
 
-      // Reply in an untracked thread — register the parent as the thread root
       if (isReply) {
         if (!agentInvoked) continue;
         if (!threads.has(key)) {
-          const threadInfo = {
+          const threadInfo = attachWorkspace({
             rootMessageId: rootId,
             chatId,
             sessionId: randomUUID(),
@@ -554,7 +640,10 @@ function pollSingleChannel(channel) {
             lastSeen: msg.id,
             lastHandledId: null,
             childPid: null,
-          };
+            defaultModel: channelDefaultModel(channel),
+            alolaDefaultModel: channelAlolaDefaultModel(channel),
+            maxConcurrentAgents: channelMaxConcurrentAgents(channel),
+          }, workspaceForChannel(channel));
           threads.set(key, threadInfo);
           saveThreadsToDisk();
           console.log(`[Thread ${rootId}] Adopted untracked thread for ${channel.label} reply`);
@@ -565,7 +654,6 @@ function pollSingleChannel(channel) {
         continue;
       }
 
-      // Top-level message — new thread
       if (!agentInvoked || !agentText) continue;
       console.log(`[Poll] New thread from ${from} in ${channel.label} (id=${msg.id}): "${agentText.slice(0, 60)}"`);
       handleNewThread(channel, agentText, from, msg.id);
@@ -581,7 +669,6 @@ function pollAllChannels() {
   }
 }
 
-// Garbage-collect expired threads on every channel poll
 function expireOldThreads() {
   for (const [rootId, threadInfo] of threads) {
     if (Date.now() - threadInfo.startTime > THREAD_TTL_MS) {
@@ -594,4 +681,23 @@ function getThreads() {
   return threads;
 }
 
-module.exports = { pollAllChannels, getThreads, threadKey, processedMessageKey, saveThreadsToDisk, loadThreadsFromDisk, gatherThreadMessages, collectThreadMessages, classifyCommand, isAgentInvocation, commandTextForMessage, agentTextForMessage, buildHelpMessage, listCronTasks, listWorkspaceCommands, listWorkspaceSkills };
+module.exports = {
+  pollAllChannels,
+  pollSingleChannel,
+  getThreads,
+  threadKey,
+  processedMessageKey,
+  saveThreadsToDisk,
+  loadThreadsFromDisk,
+  gatherThreadMessages,
+  collectThreadMessages,
+  classifyCommand,
+  isAgentInvocation,
+  commandTextForMessage,
+  agentTextForMessage,
+  buildHelpMessage,
+  listCronTasks,
+  listWorkspaceCommands,
+  listWorkspaceSkills,
+  getChannelConfig,
+};

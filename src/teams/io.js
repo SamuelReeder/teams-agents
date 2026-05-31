@@ -2,7 +2,7 @@ const { execSync } = require("child_process");
 const fs = require("fs");
 const path = require("path");
 const { marked } = require("marked");
-const { SCRIPTS_DIR, REPLY_SCRIPT, ROOT_DIR, STATE_DIR } = require("./config");
+const { SCRIPTS_DIR, REPLY_SCRIPT, ROOT_DIR, STATE_DIR } = require("../config/env");
 
 marked.setOptions({ breaks: true, gfm: true });
 const AI_PREFIX = "[AI]";

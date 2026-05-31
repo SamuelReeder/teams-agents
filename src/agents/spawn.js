@@ -4,7 +4,6 @@ const path = require("path");
 const {
   HARNESS_BIN,
   HARNESS_CONFIG,
-  WORKSPACE_DIR,
   MCP_CONFIG,
   AGENT_TIMEOUT_MS,
   ROOT_DIR,
@@ -14,7 +13,12 @@ const {
   AGENT_RUNTIME_HOST,
   DEPLOYMENT_HOST,
   ALOLA_CONFIG,
-} = require("./config");
+  ALOLA_SESSION_BIN,
+  resolveWorkspace,
+  workspaceFromPersisted,
+  attachWorkspace,
+  buildHarnessEnv,
+} = require("../config/env");
 const {
   parseAlolaTarget,
   isAsicToken,
@@ -22,30 +26,76 @@ const {
   buildSessionMetadata,
   coerceAlolaMetadata,
   describeAlolaTarget,
-} = require("./alola-session");
-const { sendToTeams, sendLargeOutput, AI_PREFIX } = require("./teams-io");
+} = require("../alola/session");
+const { sendToTeams, sendLargeOutput, AI_PREFIX } = require("../teams/io");
 
 const SESSIONS_DIR = path.join(STATE_DIR || ROOT_DIR, "sessions");
+const ALOLA_WORK_RE = /\b(build|rebuild|compile|test|ctest|smoke|benchmark|bench|perf|gpu|rocm|hipcc|rocminfo|rocm-smi|cmake|ninja|provider verification|verify providers?|runtime)\b/i;
 
-const ALOLA_WORK_RE = /\b(build|rebuild|compile|test|ctest|benchmark|bench|perf|gpu|rocm|hipcc|rocminfo|rocm-smi|cmake|ninja|provider verification|verify providers?|runtime)\b/i;
+function workspaceForThread(threadInfo = null) {
+  if (threadInfo?.workspaceDir) {
+    return workspaceFromPersisted(threadInfo.workspaceId, threadInfo.workspaceDir, threadInfo.workspaceSource || "thread");
+  }
+  const ws = resolveWorkspace();
+  if (threadInfo) attachWorkspace(threadInfo, ws);
+  return ws;
+}
+
+function existingDir(dir) {
+  try {
+    return fs.statSync(dir).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+function workspaceRelative(workspace, suffix) {
+  return path.join(workspace.dir, suffix);
+}
+
+function getProjectDirs(workspace = null) {
+  const ws = workspace || resolveWorkspace();
+  const projects = loadProjects(ws);
+  if (!projects?.projects) return [];
+
+  const dirs = new Set();
+  for (const proj of Object.values(projects.projects)) {
+    if (proj.path) dirs.add(path.isAbsolute(proj.path) ? proj.path : path.resolve(ws.dir, proj.path));
+    for (const wt of Object.values(proj.worktrees || {})) {
+      if (wt.path) dirs.add(path.isAbsolute(wt.path) ? wt.path : path.resolve(ws.dir, wt.path));
+    }
+  }
+  return [...dirs].filter((d) => existingDir(d));
+}
 
 function buildRoutingContext(threadInfo = null) {
   const os = require("os");
-  const projects = loadProjects();
+  const workspace = workspaceForThread(threadInfo || {});
+  const projects = loadProjects(workspace);
+  const machinesData = loadMachines(workspace);
+  const reposDir = workspaceRelative(workspace, "repos");
+  const worktreesDir = workspaceRelative(workspace, "worktrees");
+  const hasRepos = existingDir(reposDir);
+  const hasWorktrees = existingDir(worktreesDir);
+  const alolaCommand = ALOLA_SESSION_BIN;
   const lines = [
     "## Environment",
     `Controller host: **${AGENT_RUNTIME_HOST || os.hostname()}** (${os.platform()}, ${os.arch()}). Deployment host: **${DEPLOYMENT_HOST || AGENT_RUNTIME_HOST || os.hostname()}**. Home: \`${os.homedir()}\``,
-    "",
-    "Check `.claude/registry/machines.json` for machine-specific context.",
-    "Verify paths with `test -d` before accessing — SSH may be needed.",
+    `Harness working directory: \`${workspace.dir}\` (${workspace.source}). Treat the workspace as opaque; follow its own instructions and registries when present.`,
     "",
     "## Execution routing",
-    "- The harness process runs locally on the HPE/controller host by default. Use local HPE state for ordinary code reading, editing, review, planning, and research.",
-    "- Do not run ROCm builds, CMake/Ninja, ctest, benchmarks, provider verification, GPU runtime checks, hipcc, rocminfo, or rocm-smi directly on HPE.",
-    `- For build/test/benchmark/runtime work, use \`workspace/scripts/alola-session run -- <command>\`; default Alola target is login node ${ALOLA_CONFIG.defaultLoginNode} (${ALOLA_CONFIG.defaultAsic}).`,
+    "- The harness process runs locally on the controller host by default. Use local state for ordinary code reading, editing, review, planning, and research.",
+    `- For build/test/benchmark/runtime work, use \`${alolaCommand} run -- <command>\`; default Alola target is login node ${ALOLA_CONFIG.defaultLoginNode} (${ALOLA_CONFIG.defaultAsic}).`,
+    `- For a non-login GPU allocation, use \`${alolaCommand} run --target <asic> -- <command>\`; the default constraint is ${ALOLA_CONFIG.defaultConstraintPrefix || "<ASIC>"}&<ASIC_UPPER> and the image template is \`${ALOLA_CONFIG.imageTemplate}\`.`,
     `- For login-node enroot work, home/project paths and ${ALOLA_CONFIG.imageTemplate} are shared, but named enroot rootfses such as ${ALOLA_CONFIG.defaultLoginContainer} are node-local under /var/tmp. If a login node lacks the rootfs, recreate it from the shared image instead of switching nodes permanently.`,
-    `- For a non-login GPU allocation, use \`workspace/scripts/alola-session run --target <asic> -- <command>\`; the default constraint is ${ALOLA_CONFIG.defaultConstraintPrefix || "<ASIC>"}&<ASIC_UPPER> and the image template is \`${ALOLA_CONFIG.imageTemplate}\`.`,
+    "- Do not run ROCm builds, CMake/Ninja, ctest, benchmarks, provider verification, GPU runtime checks, hipcc, rocminfo, or rocm-smi directly on the controller host.",
+    "- If Alola verification is requested for a branch or patch, do not skip because the default Alola checkout is dirty, on another branch, or at a different path. Fetch/checkout the requested branch on Alola, or create an isolated Alola worktree and run from that path.",
+    "- If the patch exists only as uncommitted controller-local edits, first make those edits available in the Alola worktree; never run a different checkout and claim it verifies the local patch.",
   ];
+
+  if (hasRepos || hasWorktrees) {
+    lines.push(`- Optional workspace source roots found: ${hasRepos ? `\`${reposDir}\`` : "no repos/"}${hasRepos && hasWorktrees ? " and " : ""}${hasWorktrees ? `\`${worktreesDir}\`` : "no worktrees/"}. Do not assume these paths are mounted inside Alola sessions.`);
+  }
 
   const alola = coerceAlolaMetadata(threadInfo?.alola, threadInfo || undefined);
   if (alola) {
@@ -60,32 +110,54 @@ function buildRoutingContext(threadInfo = null) {
       lines.push(`- **${proj.name}** (${aliases}) — \`${proj.path}\``);
     }
   } else {
-    lines.push("- Project registry unavailable; inspect workspace/.claude/registry/projects.json before assuming paths.");
+    lines.push("- No app-level project registry was found. Inspect the selected workspace before assuming project paths.");
   }
 
   lines.push("");
   lines.push("## Machines");
-
-  const machinesData = loadMachines();
   if (machinesData?.machines) {
     for (const m of Object.values(machinesData.machines)) {
       const nodes = m.nodes ? ` (nodes: ${m.nodes.join(", ")})` : "";
-      lines.push(`- **${m.name}**${nodes} — SSH: \`${m.sshScript} <node> "<cmd>"\`, context: \`${m.context}\``);
+      lines.push(`- **${m.name}**${nodes} — SSH: \`${m.sshScript} <node> \"<cmd>\"\`, context: \`${m.context}\``);
     }
+  } else {
+    lines.push("- No app-level machine registry was found. Read workspace machine docs when present.");
   }
 
   lines.push("");
   lines.push("## Jira: ALMIOPEN→rocm-libraries, THEROCK→therock, MLSE→mlse-tools");
   lines.push("");
-  lines.push("Use workspace/.claude/registry/projects.json to resolve project context. Read machine context docs before working on remote machines.");
+  lines.push("Use workspace-local instructions and registries when they exist; otherwise ask for missing project/machine context instead of guessing paths.");
 
   return lines.join("\n");
 }
 
-function threadSessionDir(threadId) {
-  const dir = path.join(SESSIONS_DIR, threadId);
-  fs.mkdirSync(dir, { recursive: true });
+function safeSessionSegment(value) {
+  const safe = String(value || "session").replace(/[^A-Za-z0-9_.-]+/g, "_").replace(/^_+|_+$/g, "");
+  return safe || "session";
+}
+
+function threadSessionDir(threadId, workspaceOrThread = null, options = {}) {
+  const workspace = workspaceOrThread?.dir
+    ? workspaceOrThread
+    : workspaceOrThread?.workspaceDir
+      ? workspaceFromPersisted(workspaceOrThread.workspaceId, workspaceOrThread.workspaceDir, workspaceOrThread.workspaceSource || "thread")
+      : workspaceForThread(null);
+  const dir = path.join(SESSIONS_DIR, safeSessionSegment(workspace.id), safeSessionSegment(threadId));
+  if (options.create !== false) fs.mkdirSync(dir, { recursive: true });
   return dir;
+}
+
+function legacyThreadSessionDir(threadId) {
+  return path.join(SESSIONS_DIR, safeSessionSegment(threadId));
+}
+
+function existingThreadSessionDir(threadId, workspaceOrThread = null) {
+  const current = threadSessionDir(threadId, workspaceOrThread, { create: false });
+  if (existingDir(current)) return current;
+  const legacy = legacyThreadSessionDir(threadId);
+  if (existingDir(legacy)) return legacy;
+  return current;
 }
 
 function finalizeSession(sessionDir) {
@@ -110,18 +182,9 @@ function finalizeSession(sessionDir) {
   return null;
 }
 
-function getProjectDirs() {
-  const projects = loadProjects();
-  if (!projects) return [];
-
-  const dirs = new Set();
-  for (const proj of Object.values(projects.projects)) {
-    dirs.add(proj.path);
-    for (const wt of Object.values(proj.worktrees || {})) {
-      dirs.add(wt.path);
-    }
-  }
-  return [...dirs].filter((d) => fs.existsSync(d));
+function finalizeThreadSession(threadInfo, threadId = null) {
+  const id = threadId || threadInfo.rootMessageId;
+  return finalizeSession(existingThreadSessionDir(id, threadInfo));
 }
 
 function peekToken(text) {
@@ -290,19 +353,28 @@ function targetArg(metadata) {
   return metadata.loginNode === ALOLA_CONFIG.defaultLoginNode ? "default" : metadata.loginNode;
 }
 
-function buildPromptWithExecutionContext(threadInfo, prompt) {
+function inferAlolaTarget(threadInfo, prompt) {
   const explicitTarget = coerceAlolaMetadata(threadInfo.alola, threadInfo);
-  const inferredTarget = explicitTarget || (promptNeedsAlola(prompt) ? buildSessionMetadata(threadInfo, parseAlolaTarget([])) : null);
+  return explicitTarget || (promptNeedsAlola(prompt) ? buildSessionMetadata(threadInfo, parseAlolaTarget([])) : null);
+}
+
+function buildPromptWithExecutionContext(threadInfo, prompt) {
+  const inferredTarget = inferAlolaTarget(threadInfo, prompt);
   if (!inferredTarget) return prompt;
 
   const target = targetArg(inferredTarget);
   const targetFlag = target === "default" ? "" : ` --target ${target}`;
+  const workspace = workspaceForThread(threadInfo);
   const lines = [
     "[Execution routing]",
-    "The harness stays local to the HPE/controller host. Run ROCm build/test/benchmark/runtime commands through a durable Alola session, not directly on HPE.",
+    "The harness stays local to the controller host. Run ROCm build/test/benchmark/runtime commands through a durable Alola session, not directly on the controller host.",
+    `Harness working directory: ${workspace.dir}`,
     `Target: ${describeAlolaTarget(inferredTarget)}.`,
-    `Use \`workspace/scripts/alola-session run${targetFlag} -- <command>\` for CMake/Ninja/ctest/hipcc/rocminfo/rocm-smi/provider-verification work.`,
+    `Use \`${ALOLA_SESSION_BIN} run${targetFlag} -- <command>\` for CMake/Ninja/ctest/hipcc/rocminfo/rocm-smi/provider-verification work.`,
     `Alola home/project paths and images are shared, but login-node enroot rootfses such as ${inferredTarget.container || ALOLA_CONFIG.defaultLoginContainer} are node-local under /var/tmp; if \`enroot list\` lacks the target container, recreate it from the shared image and retry.`,
+    "Do not assume workspace-local repos or worktrees are mounted inside Alola sessions.",
+    "Do not skip requested Alola verification because the default Alola checkout is dirty, on another branch, or at a different path; fetch/checkout the requested branch or create an isolated Alola worktree, then run from that path.",
+    "If the patch exists only as uncommitted local edits, first make those edits available in the Alola worktree; otherwise report that exact missing prerequisite instead of verifying the wrong checkout.",
   ];
   if (inferredTarget.mode === "gpu") {
     lines.push(`GPU allocation is non-exclusive, image ${inferredTarget.image}, constraint ${inferredTarget.constraint}, timeout ${inferredTarget.timeLimit}.`);
@@ -310,9 +382,19 @@ function buildPromptWithExecutionContext(threadInfo, prompt) {
   return `${lines.join("\n")}\n\n${prompt}`;
 }
 
+function defaultModelForPrompt(threadInfo, prompt) {
+  const usesAlola = Boolean(inferAlolaTarget(threadInfo, prompt));
+  if (usesAlola) {
+    return threadInfo.alolaDefaultModel || threadInfo.defaultModel || HARNESS_CONFIG.alolaDefaultModel || HARNESS_CONFIG.defaultModel;
+  }
+  return threadInfo.defaultModel || HARNESS_CONFIG.defaultModel;
+}
+
 function buildHarnessArgs(threadInfo, prompt, harnessArgs = []) {
+  const workspace = workspaceForThread(threadInfo);
   const args = Array.from(HARNESS_CONFIG.baseArgs);
   const finalPrompt = buildPromptWithExecutionContext(threadInfo, prompt);
+  const defaultModel = defaultModelForPrompt(threadInfo, prompt);
 
   const canResume = threadInfo.isFollowUp && threadInfo.harnessSessionId;
 
@@ -328,14 +410,14 @@ function buildHarnessArgs(threadInfo, prompt, harnessArgs = []) {
   }
 
   if (HARNESS_CONFIG.flags.sessionDir && threadInfo.rootMessageId) {
-    args.push(HARNESS_CONFIG.flags.sessionDir, threadSessionDir(threadInfo.rootMessageId));
+    args.push(HARNESS_CONFIG.flags.sessionDir, threadSessionDir(threadInfo.rootMessageId, workspace));
   }
 
   if (HARNESS_CONFIG.skipPermissions && HARNESS_CONFIG.flags.skipPermissions) {
     args.push(HARNESS_CONFIG.flags.skipPermissions);
   }
 
-  args.push(...withDefaultModel(harnessArgs, HARNESS_CONFIG.defaultModel));
+  args.push(...withDefaultModel(harnessArgs, defaultModel));
 
   if (HARNESS_CONFIG.flags.prompt) {
     args.push(HARNESS_CONFIG.flags.prompt, finalPrompt);
@@ -346,7 +428,12 @@ function buildHarnessArgs(threadInfo, prompt, harnessArgs = []) {
   return args;
 }
 
-function prepareHarnessArgs(baseArgs) {
+function prepareHarnessArgs(baseArgs, workspaceOrThread = null) {
+  const workspace = workspaceOrThread?.dir
+    ? workspaceOrThread
+    : workspaceOrThread?.workspaceDir
+      ? workspaceFromPersisted(workspaceOrThread.workspaceId, workspaceOrThread.workspaceDir, workspaceOrThread.workspaceSource || "thread")
+      : resolveWorkspace();
   const args = baseArgs.slice();
   const promptFlag = HARNESS_CONFIG.flags.prompt;
   let promptIndex = promptFlag ? args.lastIndexOf(promptFlag) : args.length - 1;
@@ -359,7 +446,7 @@ function prepareHarnessArgs(baseArgs) {
   }
 
   if (HARNESS_CONFIG.flags.addDir) {
-    for (const dir of getProjectDirs()) {
+    for (const dir of getProjectDirs(workspace)) {
       args.splice(insertAt, 0, HARNESS_CONFIG.flags.addDir, dir);
       insertAt += 2;
     }
@@ -373,7 +460,7 @@ let activeAgents = 0;
 function processPending(threadInfo, replyToId, maxConcurrent) {
   if (!threadInfo.hasPending) return;
   threadInfo.hasPending = false;
-  const { gatherThreadMessages } = require("./threads");
+  const { gatherThreadMessages } = require("../teams/threads");
   const text = gatherThreadMessages(threadInfo);
   if (!text) return;
   threadInfo.isFollowUp = true;
@@ -384,7 +471,7 @@ function processPending(threadInfo, replyToId, maxConcurrent) {
 }
 
 function persistThreadsBestEffort() {
-  try { require("./threads").saveThreadsToDisk(); } catch {}
+  try { require("../teams/threads").saveThreadsToDisk(); } catch {}
 }
 
 function isTransientProviderStreamFailure(text) {
@@ -427,6 +514,7 @@ function spawnAgent(threadInfo, message, replyToId, maxConcurrent = 3) {
     return;
   }
 
+  const workspace = workspaceForThread(threadInfo);
   let parsedFlags;
   try {
     parsedFlags = extractFlags(message);
@@ -445,19 +533,20 @@ function spawnAgent(threadInfo, message, replyToId, maxConcurrent = 3) {
 
   const prompt = parsedFlags.prompt;
   const stickyArgs = applyStickyOptions(threadInfo, parsedFlags.harnessArgs);
-  const harnessArgs = prepareHarnessArgs(buildHarnessArgs(threadInfo, prompt, stickyArgs));
+  const harnessArgs = prepareHarnessArgs(buildHarnessArgs(threadInfo, prompt, stickyArgs), workspace);
   const wasResumingHarnessSession = Boolean(threadInfo.isFollowUp && threadInfo.harnessSessionId);
+  const includeAlola = Boolean(inferAlolaTarget(threadInfo, prompt));
 
   activeAgents++;
 
   const target = threadInfo.alola ? `, target: ${describeAlolaTarget(threadInfo.alola)}` : "";
   console.log(
-    `[Thread ${threadInfo.rootMessageId}] Spawning local (session: ${threadInfo.sessionId.slice(0, 8)}..., follow-up: ${threadInfo.isFollowUp}${target}, active: ${activeAgents})`
+    `[Thread ${threadInfo.rootMessageId}] Spawning local (session: ${threadInfo.sessionId.slice(0, 8)}..., workspace: ${workspace.id}, follow-up: ${threadInfo.isFollowUp}${target}, active: ${activeAgents})`
   );
 
   const proc = spawn(HARNESS_BIN, harnessArgs, {
-    cwd: WORKSPACE_DIR,
-    env: { ...process.env },
+    cwd: workspace.dir,
+    env: buildHarnessEnv({ includeAlola }),
     stdio: ["ignore", "pipe", "pipe"],
   });
 
@@ -480,7 +569,7 @@ function spawnAgent(threadInfo, message, replyToId, maxConcurrent = 3) {
     threadInfo.childPid = null;
 
     if (HARNESS_CONFIG.flags.sessionDir && threadInfo.rootMessageId) {
-      const sid = finalizeSession(threadSessionDir(threadInfo.rootMessageId));
+      const sid = finalizeThreadSession(threadInfo);
       if (sid) {
         threadInfo.harnessSessionId = sid;
         console.log(`[Thread ${threadInfo.rootMessageId}] Session: ${sid.slice(0, 12)}...`);
@@ -517,9 +606,14 @@ module.exports = {
   applyStickyOptions,
   normalizeBareModel,
   finalizeSession,
+  finalizeThreadSession,
   threadSessionDir,
+  legacyThreadSessionDir,
+  existingThreadSessionDir,
+  workspaceForThread,
   promptNeedsAlola,
   isTransientProviderStreamFailure,
   buildPromptWithExecutionContext,
   buildAgentResult,
+  defaultModelForPrompt,
 };

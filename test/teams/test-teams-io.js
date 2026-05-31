@@ -2,7 +2,7 @@ const { describe, it } = require("node:test");
 const assert = require("node:assert/strict");
 
 // Import only the pure functions (no side effects)
-const { stripHtml, escapeHtml } = require("../lib/teams-io");
+const { stripHtml, escapeHtml } = require("../../src/teams/io");
 
 describe("stripHtml", () => {
   it("removes HTML tags", () => {

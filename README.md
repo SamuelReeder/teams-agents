@@ -1,85 +1,206 @@
 # Teams Agents
 
-Microsoft Teams bot that dispatches coding-agent harnesses from a Teams channel. The production topology is HPE-hosted: the harness runs locally on `hpe-sjc2-43` by default, while ROCm build/test/benchmark/GPU work is executed through durable Alola tmux sessions.
+Microsoft Teams bot that dispatches an Oh My Pi/Claude-compatible harness from Teams chats. It supports one-chat setup through `TEAMS_CHAT_ID`, multi-chat configuration with per-chat workspaces and model defaults, recurring polls, persistent Teams threads, Docker deployment, and optional Alola remote execution routing.
 
-## Architecture
-
-```text
-Teams
-  -> Teams bot on hpe-sjc2-43
-      -> local Oh My Pi / harness agent process
-          -> workspace/scripts/alola-session when ROCm/GPU execution is needed
-              -> SSH to ctr2-alola-login-03/04
-                  -> persistent login-node enroot tmux shell, or
-                  -> persistent tmux-held non-exclusive SLURM GPU allocation
-```
-
-Repository layout:
+## Repository layout
 
 ```text
-teams-agents/
-├── server.js                  # Express server, polling, dashboard
-├── lib/
-│   ├── config.js              # env, paths, HPE/Alola configuration
-│   ├── agent-spawn.js         # local harness lifecycle and routing context
-│   ├── alola-session.js       # SSH/tmux/enroot/SLURM session manager
-│   ├── teams-io.js            # Teams messaging via Skype API
-│   └── threads.js             # thread state, polling loops
-├── scripts/alola-session.js   # CLI entrypoint used by workspace wrapper
+.
+├── bin/
+│   └── alola-session              # app-level Alola CLI
+├── config/
+│   ├── channels.example.json
+│   └── env.example
+├── scripts/
+│   ├── alola-session.js           # compatibility launcher for old workspace wrappers
+│   ├── setup.js                   # setup/config validation
+│   └── teams/
+│       └── reply.py
+├── src/
+│   ├── index.js                   # Express server, dashboard, poll loop
+│   ├── config/                    # env, channels, secrets, workspaces
+│   ├── agents/                    # harness args, spawn, routing context
+│   ├── teams/                     # Teams IO and thread handling
+│   ├── polls/                     # recurring poll scheduler
+│   ├── alola/                     # SSH/tmux/enroot/SLURM session manager
+│   └── state/                     # state store compatibility exports
+├── test/
+│   ├── agents/ config/ teams/ polls/ alola/ docker/ state/
+├── workspace/                     # optional bundled/default workspace
 ├── Dockerfile
-├── compose.yaml
-└── workspace/                 # submodule with project knowledge, agents, skills
+└── compose.yaml
 ```
 
-The `workspace/` submodule contains project knowledge, specialist agents, slash commands, skills, machine configs, and `workspace/scripts/alola-session`, a wrapper around the app-level Alola session manager.
+`server.js` remains as a short compatibility launcher; new deployments should run `node src/index.js` or `npm start`.
 
-## HPE deployment
+## Quick start: one Teams chat
 
-Deploy from a fresh clone on HPE, not by copying this workstation checkout:
+1. Install dependencies:
 
 ```bash
-git clone --recurse-submodules --branch hpe-alola-persistent-sessions git@github.com:SamuelReeder/teams-agents.git
-cd teams-agents
-git submodule update --init --recursive
 npm ci
 ```
 
-Create `.env` on HPE with Teams and harness settings:
+2. Copy the environment template and fill in the required values:
 
 ```bash
-TEAMS_CHAT_ID=19:your-channel-id@thread.skype
-PORT=3978
-POLL_INTERVAL=5000
-HARNESS_BIN=/home/sareeder/.local/bin/omp
-HARNESS_BASE_ARGS="--print"
-HARNESS_SKIP_PERMISSIONS=1
-AGENT_PREFIX=!agent
-HARNESS_APPEND_SYSTEM_PROMPT=1
-PI_STREAM_FIRST_EVENT_TIMEOUT_MS=600000
-PI_STREAM_IDLE_TIMEOUT_MS=600000
+cp config/env.example .env
 ```
 
-Authenticate Teams once on HPE using the mounted/installed m365 Teams skill:
+At minimum, set:
+
+```bash
+TEAMS_CHAT_ID=19:your-chat-id@thread.skype
+HARNESS_BIN=/absolute/path/to/omp   # or leave unset if omp is on PATH
+```
+
+3. Authenticate the Microsoft Teams helper scripts used by your `TEAMS_SCRIPTS_DIR` installation:
 
 ```bash
 python3 ~/.claude/skills/m365-teams/scripts/auth.py
 python3 ~/.claude/skills/m365-teams/scripts/auth.py --complete <device_code>
 ```
 
-
-### SSH key for Alola
-
-Production Alola access is key-based. Do not store passwords in the repo, `.env`, image, or compose file.
+4. Choose a workspace, or omit it:
 
 ```bash
-mkdir -p secrets
-install -m 0400 /path/to/alola_key secrets/alola_ssh_key
-ssh -i secrets/alola_ssh_key -o BatchMode=yes -o StrictHostKeyChecking=yes sareeder@ctr2-alola-login-03 hostname
+# Optional. If omitted, the bot uses ./workspace when present, otherwise $HOME.
+APP_WORKSPACE_DIR=/absolute/path/to/workspace
 ```
 
-Relevant environment defaults:
+A workspace is treated as an opaque harness working directory. The bot does not require `.claude/`, `.shared/`, `repos/`, `worktrees/`, or registry files to exist. If those conventional files exist, help/dashboard output may surface them; otherwise the harness simply starts with `cwd` set to the selected workspace.
+
+5. Validate configuration:
 
 ```bash
+npm run setup:check
+```
+
+6. Start the bot:
+
+```bash
+npm start
+```
+
+Dashboard: `http://localhost:3978/`.
+
+## Multi-chat configuration
+
+The preferred channel file is `config/channels.json`. Set `APP_CHANNELS_FILE` to use another path. For backward compatibility, root `channels.json` is still used when `config/channels.json` does not exist.
+
+Create `config/channels.json` from the example:
+
+```bash
+cp config/channels.example.json config/channels.json
+```
+
+Each channel can set its own workspace, model defaults, and concurrency:
+
+```json
+[
+  {
+    "chatId": "19:chat-a@thread.skype",
+    "label": "Workspace A",
+    "workspace": "/srv/workspaces/a",
+    "defaultModel": "openai/gpt-5.5",
+    "alolaDefaultModel": "anthropic/claude-haiku-4-5",
+    "maxConcurrentAgents": 2
+  },
+  {
+    "chatId": "19:chat-b@thread.skype",
+    "label": "Workspace B",
+    "workspace": "~/workspaces/b",
+    "defaultModel": "anthropic/claude-haiku-4-5",
+    "maxConcurrentAgents": 1
+  }
+]
+```
+
+Validation rejects malformed JSON, duplicate chat IDs, missing `chatId`, non-string `workspace` values, and non-positive `maxConcurrentAgents`.
+
+Workspace resolution order is:
+
+1. `channel.workspace`
+2. `APP_WORKSPACE_DIR`
+3. `<repo>/workspace`, when it exists
+4. `$HOME`
+
+Explicitly configured workspace paths must exist and be readable. The implicit bundled `workspace/` fallback is optional; when absent, `$HOME` is used.
+
+## Secrets
+
+Secrets are resolved at runtime; they are not baked into the Docker image. For a secret named `OPENAI_API_KEY`, resolution precedence is:
+
+1. `OPENAI_API_KEY_FILE`
+2. `/run/secrets/openai_api_key`
+3. `APP_SECRETS_DIR/openai_api_key`
+4. direct `OPENAI_API_KEY` environment value for local development
+
+The same naming rule applies to `ANTHROPIC_API_KEY`, `LLM_GATEWAY_API_KEY`, and other allowlisted harness provider keys. Direct values are convenient for local development but are visible to the spawned harness when injected.
+
+Important exposure model:
+
+- Bot-only Teams credentials and Teams helper script state are not passed to spawned harness processes.
+- Harness-required LLM/provider keys are passed only by explicit allowlist. If the harness can use a key, an agent can expose or misuse it.
+- `ALOLA_SSH_KEY` is handled as a path secret. The bot passes a readable key path only to Alola-routed harness runs; it does not read private key material into logs or ordinary harness environments.
+- Docker secrets and `*_FILE` variables protect against repo/image/log leakage. They are not a sandbox boundary once a child process can read the file or value.
+
+For stronger isolation, run the harness under a separate user/container or broker privileged operations through the bot instead of giving raw credentials to the harness.
+
+## Docker Compose
+
+Default build and run:
+
+```bash
+docker compose up -d --build
+docker compose logs -f teams-bot
+```
+
+Use a custom base image:
+
+```bash
+BASE_IMAGE=my-node-runtime:tag docker compose build
+```
+
+The custom image must provide a Node/npm runtime compatible with this app. The current Dockerfile installs OS dependencies with Debian `apt`; custom images should be Debian-compatible unless you also carry those dependencies in the base image.
+
+Compose defaults are portable:
+
+- state: `teams_state:/app/state`
+- logs: `teams_logs:/app/logs`
+- workspace: `${HOST_WORKSPACE_DIR:-./workspace}:${APP_WORKSPACE_DIR:-/app/workspace}`
+- optional durable workspace source roots: `teams_workspace_repos` and `teams_workspace_worktrees`
+- home: `${HOST_HOME_DIR:-teams_home}:/home/${APP_USER:-teamsbot}`
+- Alola key: Docker secret `alola_ssh_key`, sourced from `${ALOLA_SSH_KEY_SOURCE:-./secrets/alola_ssh_key}` and mounted at `/run/secrets/alola_ssh_key`
+
+The base compose file does not mount a host Docker socket or run privileged.
+
+## Alola routing
+
+The app-level CLI is `bin/alola-session` and is also exposed as the package binary `alola-session`. The bundled `workspace/scripts/alola-session` wrapper remains for compatibility, but external workspaces do not need to contain it.
+
+Examples:
+
+```bash
+bin/alola-session run -- 'hostname && pwd && command -v hipcc'
+bin/alola-session run --target 04 -- 'hostname'
+bin/alola-session run --target gfx942 -- 'rocminfo'
+bin/alola-session run --target gpu:gfx90a -- 'rocminfo'
+bin/alola-session status --target gfx942
+bin/alola-session attach --target gfx942
+bin/alola-session stop --target gfx942
+```
+
+`--alola` in Teams messages is consumed by the bot and is not forwarded to the harness. It records a durable remote execution target for that Teams thread. Build/test/runtime prompts can also infer Alola routing from the prompt; the injected routing context tells the agent to use the app-level CLI.
+
+HPE/Alola deployments usually override these values in `.env` or an override file:
+
+```bash
+APP_USER=sareeder
+APP_UID=1038
+APP_GID=1037
+HARNESS_BIN=/home/sareeder/.local/bin/omp
+HOST_HOME_DIR=/home/sareeder
 ALOLA_USER=sareeder
 ALOLA_LOGIN_NODES=03,04
 ALOLA_DEFAULT_LOGIN_NODE=03
@@ -88,149 +209,40 @@ ALOLA_DEFAULT_LOGIN_CONTAINER=sareeder-latest_container
 ALOLA_IMAGE_TEMPLATE=/cluster/images/hipdnn/hipdnn_latest_{asic}.sqsh
 ALOLA_DEFAULT_CONSTRAINT_PREFIX=MARKHAM
 ALOLA_DEFAULT_GPU_TIMEOUT=08:00:00
-ALOLA_SSH_KEY=/run/secrets/alola_ssh_key
-ALOLA_SSH_OPTIONS="-o BatchMode=yes -o StrictHostKeyChecking=yes"
-APP_STATE_DIR=/app/state
-APP_LOG_DIR=/app/logs
-APP_SECRETS_DIR=/app/secrets
-AGENT_PREFIX=!agent
+ALOLA_SSH_KEY_SOURCE=./secrets/alola_ssh_key
 ```
 
-### Docker Compose
+## Teams usage
 
-```bash
-docker compose up -d --build
-docker compose logs -f teams-bot
-```
-
-Compose builds the image with the HPE account UID/GID (`APP_USER=sareeder`, `APP_UID=1038`, `APP_GID=1037` by default), mounts `/home/sareeder` into the container, and mounts durable HPE-local volumes for state/logs plus the read-only Alola deploy key. That makes SSH/Git, OMP (`/home/sareeder/.local/bin/omp`), and OMP MCP config (`/home/sareeder/.omp/agent/mcp.json`) match the HPE account while keeping the bot independent of this WSL checkout. It does not mount the Docker socket and does not run privileged.
-
-Dashboard: `http://hpe-sjc2-43:3978/`.
-
-## Local/manual run
-
-```bash
-npm install
-./start.sh
-# or
-node server.js
-```
-
-`start.sh` is for interactive launches. Container deployments should use Compose/process-manager restarts rather than killing by port.
-
-## Usage
-
-Post a message in the monitored Teams channel. The bot starts a harness session and replies in the thread. Replies continue the same harness session.
-
-### Default execution
-
-No flag means the harness runs locally on HPE. Agents receive routing context instructing them to keep ordinary code/review/research work local, and to use Alola sessions for ROCm builds/tests/benchmarks/GPU runtime/provider verification.
-
-Examples:
+Post a message with the configured prefix (default `!agent`) in a monitored Teams chat:
 
 ```text
-Build hipDNN in the consumption worktree
-What's the status of ALMIOPEN-1300?
-Check GPU utilization on Alola
+!agent summarize the current branch
+!agent --model openai/gpt-5.5 investigate this failure
+!agent --alola gfx942 run rocminfo and verify the MI300 path
 ```
 
-Build/test prompts do not require `--alola`; the routing context directs the agent to `workspace/scripts/alola-session` automatically.
+Replies in the Teams thread continue the same harness session. The bot persists thread state under `APP_STATE_DIR/threads.json` and harness session files under `APP_STATE_DIR/sessions/<workspaceId>/<threadId>`. Legacy `sessions/<threadId>` directories are still discovered for migration.
 
-### Alola target flags
-
-`--alola` is consumed by the bot and is not forwarded to the harness. It keeps the harness local to HPE while setting a durable remote execution target for that Teams thread.
+Bot commands can be sent directly:
 
 ```text
---alola build hipDNN in the consumption worktree
---alola 04 run a quick login-node ROCm environment check
---alola gfx942 run rocminfo and verify the MI300 path
---alola 03 gfx950 run the gfx950 provider verification
---alola gpu:gfx90a force a compute-node allocation for gfx90a
---alola=gfx942 run a benchmark smoke test
+!help
+!models [filter]
+!cron <interval> [--fresh] <prompt>
+!cron-cancel <id>
+!cron-restart <id>
+!crons [--all]
 ```
 
-Follow-up replies preserve the thread target unless a new `--alola ...` flag overrides it. GPU allocations use non-exclusive SLURM jobs with the configured timeout. If an allocation expires before a later prompt, the next command using the same target reacquires a fresh allocation.
-Login nodes `03` and `04` share mounted home/project paths and `/cluster/images/hipdnn` images, but named enroot container rootfses are node-local under `/var/tmp/<uid>/enroot-data`. If a login node lacks `sareeder-latest_container`, recreate it from the shared image (`enroot create -n sareeder-latest_container /cluster/images/hipdnn/hipdnn_latest_gfx90a.sqsh`) and retry instead of permanently routing around that node.
+Recurring polls persist workspace identity and post results as new Teams threads. Replies to poll result threads are routed back to the poll's workspace and session.
 
-### Harness flags
+## Tests
 
-Leading `--` flags other than `--alola` are forwarded verbatim to the harness:
-
-```text
---model openai/gpt-5.5 summarize the failing tests
---effort high --temperature 0.2 investigate this issue
---verbose -- prompt that starts after a valueless flag
-```
-
-Use standalone `--` to end harness flags before prompts that start with dashes.
-
-## Alola session CLI
-
-The session CLI writes command payloads to remote script files, invokes them through tmux, and captures output using start/done sentinels.
+Run the full suite:
 
 ```bash
-# Default login-node enroot session: node 03, gfx90a
-workspace/scripts/alola-session run -- 'hostname && pwd && command -v hipcc'
-
-# Specific login node
-workspace/scripts/alola-session run --target 04 -- 'hostname'
-
-# Non-exclusive GPU allocation
-workspace/scripts/alola-session run --target gfx942 -- 'rocminfo'
-
-# Force compute-node allocation for login ASIC
-workspace/scripts/alola-session run --target gpu:gfx90a -- 'rocminfo'
-
-# Status, attach, stop
-workspace/scripts/alola-session status --target gfx942
-workspace/scripts/alola-session attach --target gfx942
-workspace/scripts/alola-session stop --target gfx942
+npm test
 ```
 
-Human attach commands are printed by `attach`; sessions are shared with agents where practical. Login sessions are cheap to keep. GPU sessions are bounded by SLURM `--time` and can be reacquired automatically.
-
-## Workspace commands
-
-Available workspace slash commands are passed through to the harness:
-
-| Command | Description |
-|---------|-------------|
-| `/worktrees` | List or manage worktrees |
-| `/orchestrate <JIRA-KEY>` | Full Jira → worktree → implement → PR pipeline |
-| `/review-pr <project>` | Multi-agent code review |
-| `/squash-prep [project] [base]` | Suggest squash strategy for clean history |
-
-Available workspace skills are also listed by `!help`; ask for them by name, e.g. `pr-summary` or `hipdnn-superbuild-test`.
-
-## Jira MCP
-
-OMP discovers Jira MCP from the mounted HPE home at `~/.omp/agent/mcp.json`; `mcp/mcp-servers.json` is only for non-OMP harnesses that still use `--mcp-config`. If Jira tools return `401 Unauthorized`, refresh the Atlassian token in `~/.omp/agent/mcp.json` and start a new OMP session/container before retrying. A safe credential smoke test is `jira_get_all_projects`; it should return project JSON from `https://amd-hub.atlassian.net`.
-
-
-## Agent spawn details
-
-Local agents are spawned with OMP defaults like:
-
-```bash
-$HARNESS_BIN ${HARNESS_BASE_ARGS} \
-  ${HARNESS_SYSTEM_PROMPT_FLAG:-"--append-system-prompt"} "<HPE/Alola routing context>" \
-  <forwarded leading -- flags from the Teams message> \
-  ${HARNESS_PROMPT_FLAG:-"-p"} "<user message>"
-```
-
-For non-OMP harnesses, `HARNESS_SESSION_FLAG`, `HARNESS_SKIP_PERMISSIONS_FLAG`, `HARNESS_MCP_FLAG`, and `HARNESS_ADD_DIR_FLAG` may also be set.
-- OMP has its own provider stream watchdogs before the bot-level `AGENT_TIMEOUT`: `PI_STREAM_FIRST_EVENT_TIMEOUT_MS` controls how long to wait for the first provider event, and `PI_STREAM_IDLE_TIMEOUT_MS` controls later stream stalls. The compose defaults set both to `600000` ms.
-
-- `cwd`: `workspace/` so the harness discovers AGENTS/CLAUDE instructions, skills, commands, and agents.
-- State files default under the repo for local runs and under `APP_STATE_DIR` in deployment.
-- Large outputs are split across multiple Teams replies.
-
-## Teams API
-
-Uses the Microsoft Teams Skype internal API:
-
-- Auth: OAuth2 device code flow with Teams Desktop client ID.
-- Read messages: `list_messages.py` via Skype messaging service.
-- Send messages: `send_chat.py` via Graph API (`ChatMessage.Send`).
-- Thread replies: `reply.py` posts to `{channelId};messageid={rootId}`.
-- Tokens auto-refresh; re-auth is needed after extended inactivity.
+The suite covers flag parsing, harness arg ordering, workspace fallback, channel schema validation, per-channel model/concurrency defaults, secret resolution/redaction, bot-secret environment isolation, thread/poll workspace persistence, legacy session migration, Docker build context rules, Docker base-image customization, Teams thread collection, and Alola command construction.

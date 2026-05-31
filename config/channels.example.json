@@ -1,0 +1,21 @@
+[
+  {
+    "chatId": "19:single-chat-id@thread.skype",
+    "label": "Default agent chat"
+  },
+  {
+    "chatId": "19:workspace-a@thread.skype",
+    "label": "Workspace A",
+    "workspace": "/absolute/path/to/workspace-a",
+    "defaultModel": "openai/gpt-5.5",
+    "alolaDefaultModel": "anthropic/claude-haiku-4-5",
+    "maxConcurrentAgents": 2
+  },
+  {
+    "chatId": "19:workspace-b@thread.skype",
+    "label": "Workspace B",
+    "workspace": "~/workspaces/workspace-b",
+    "defaultModel": "anthropic/claude-haiku-4-5",
+    "maxConcurrentAgents": 1
+  }
+]

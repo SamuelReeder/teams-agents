@@ -2,15 +2,17 @@ const { describe, it, beforeEach, afterEach } = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("fs");
 const path = require("path");
-const { ROOT_DIR, STATE_DIR, THREAD_TTL_MS } = require("../lib/config");
-const { buildSessionMetadata, parseAlolaTarget } = require("../lib/alola-session");
+const { ROOT_DIR, STATE_DIR, THREAD_TTL_MS, workspaceIdForDir, resolveWorkspace } = require("../../src/config/env");
+const { buildSessionMetadata, parseAlolaTarget } = require("../../src/alola/session");
 
 const THREADS_FILE = path.join(STATE_DIR || ROOT_DIR, "threads.json");
 const SESSIONS_DIR = path.join(STATE_DIR || ROOT_DIR, "sessions");
 
 let savedContent = null;
+const cleanupPaths = [];
 
 beforeEach(() => {
+  savedContent = null;
   if (fs.existsSync(THREADS_FILE)) {
     savedContent = fs.readFileSync(THREADS_FILE, "utf8");
   }
@@ -22,11 +24,14 @@ afterEach(() => {
   } else if (fs.existsSync(THREADS_FILE)) {
     fs.unlinkSync(THREADS_FILE);
   }
+  while (cleanupPaths.length) {
+    fs.rmSync(cleanupPaths.pop(), { recursive: true, force: true });
+  }
 });
 
 describe("saveThreadsToDisk", () => {
   it("writes threads.json with serializable fields", () => {
-    const { getThreads, saveThreadsToDisk, threadKey } = require("../lib/threads");
+    const { getThreads, saveThreadsToDisk, threadKey } = require("../../src/teams/threads");
     const threads = getThreads();
 
     const alola = buildSessionMetadata(
@@ -70,6 +75,8 @@ describe("saveThreadsToDisk", () => {
     assert.equal(entry.chatId, "test-chat-id", "chatId persisted");
     assert.equal(entry.lastHandledId, "test-handled-42", "lastHandledId persisted");
     assert.equal(entry.lastSeen, "test-msg-99", "lastSeen persisted");
+    assert.equal(entry.workspaceDir, resolveWorkspace().dir, "workspaceDir persisted");
+    assert.equal(entry.workspaceId, workspaceIdForDir(resolveWorkspace().dir), "workspaceId persisted");
     assert.equal(entry.busy, undefined, "transient field busy excluded");
     assert.equal(entry.childPid, undefined, "transient field childPid excluded");
     assert.equal(entry.pending, undefined, "transient field pending excluded");
@@ -81,7 +88,7 @@ describe("saveThreadsToDisk", () => {
 
 describe("loadThreadsFromDisk", () => {
   it("restores threads from threads.json", () => {
-    const { getThreads, loadThreadsFromDisk, threadKey } = require("../lib/threads");
+    const { getThreads, loadThreadsFromDisk, threadKey } = require("../../src/teams/threads");
     const threads = getThreads();
     const key = threadKey("19:test@thread.skype", "load-test-1");
 
@@ -117,7 +124,7 @@ describe("loadThreadsFromDisk", () => {
   });
 
   it("restores Alola target metadata", () => {
-    const { getThreads, loadThreadsFromDisk, threadKey } = require("../lib/threads");
+    const { getThreads, loadThreadsFromDisk, threadKey } = require("../../src/teams/threads");
     const threads = getThreads();
     const key = threadKey("19:test@thread.skype", "load-alola-1");
     const alola = buildSessionMetadata(
@@ -156,7 +163,7 @@ describe("loadThreadsFromDisk", () => {
   });
 
   it("filters out threads older than TTL", () => {
-    const { getThreads, loadThreadsFromDisk, threadKey } = require("../lib/threads");
+    const { getThreads, loadThreadsFromDisk, threadKey } = require("../../src/teams/threads");
     const threads = getThreads();
 
     const expired = new Date(Date.now() - THREAD_TTL_MS - 60000).toISOString();
@@ -194,22 +201,16 @@ describe("loadThreadsFromDisk", () => {
     threads.delete(recentKey);
   });
 
-  it("recovers harnessSessionId from session directory", () => {
-    const { getThreads, loadThreadsFromDisk, threadKey } = require("../lib/threads");
+  it("recovers harnessSessionId from a legacy sessions/<threadId> directory", () => {
+    const { getThreads, loadThreadsFromDisk, threadKey } = require("../../src/teams/threads");
     const threads = getThreads();
+    const threadId = "legacy-recovery-thread";
+    const recoveredId = "11111111-2222-3333-4444-555555555555";
+    const legacyDir = path.join(SESSIONS_DIR, threadId);
+    fs.mkdirSync(legacyDir, { recursive: true });
+    cleanupPaths.push(legacyDir);
+    fs.writeFileSync(path.join(legacyDir, `session_${recoveredId}.jsonl`), "{}\n");
 
-    const existingDirs = fs.existsSync(SESSIONS_DIR)
-      ? fs.readdirSync(SESSIONS_DIR).filter((d) => {
-          const full = path.join(SESSIONS_DIR, d);
-          return fs.statSync(full).isDirectory() && /^\d+$/.test(d);
-        })
-      : [];
-
-    if (existingDirs.length === 0) {
-      return;
-    }
-
-    const threadId = existingDirs[0];
     const key = threadKey(null, threadId);
     const testData = [
       {
@@ -229,17 +230,25 @@ describe("loadThreadsFromDisk", () => {
 
     const restored = threads.get(key);
     assert.ok(restored, "thread restored");
-    assert.ok(
-      restored.harnessSessionId,
-      `harnessSessionId recovered from session dir: ${restored.harnessSessionId}`
-    );
+    assert.equal(restored.harnessSessionId, recoveredId);
+    assert.equal(restored.workspaceDir, resolveWorkspace().dir, "legacy thread migrated to default workspace");
 
     threads.delete(key);
   });
 
+  it("creates new session directories under sessions/<workspaceId>/<threadId>", () => {
+    const { threadSessionDir } = require("../../src/agents/spawn");
+    const workspace = resolveWorkspace();
+    const dir = threadSessionDir("new-session-thread", workspace);
+    cleanupPaths.push(path.join(SESSIONS_DIR, workspace.id));
+
+    assert.equal(dir, path.join(SESSIONS_DIR, workspace.id, "new-session-thread"));
+    assert.equal(fs.statSync(dir).isDirectory(), true);
+  });
+
   it("defaults chatId to TEAMS_CHAT_ID for pre-migration threads", () => {
-    const { getThreads, loadThreadsFromDisk, threadKey } = require("../lib/threads");
-    const { CHAT_ID } = require("../lib/config");
+    const { getThreads, loadThreadsFromDisk, threadKey } = require("../../src/teams/threads");
+    const { CHAT_ID } = require("../../src/config/env");
     const threads = getThreads();
     const key = threadKey(CHAT_ID || null, "migration-test-1");
 
@@ -267,7 +276,7 @@ describe("loadThreadsFromDisk", () => {
   });
 
   it("keeps identical Teams message IDs isolated by chat", () => {
-    const { getThreads, loadThreadsFromDisk, threadKey } = require("../lib/threads");
+    const { getThreads, loadThreadsFromDisk, threadKey } = require("../../src/teams/threads");
     const threads = getThreads();
     const rootMessageId = "same-root-id";
     const chatA = "19:chat-a@thread.skype";

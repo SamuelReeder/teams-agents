@@ -6,13 +6,19 @@ const {
   ROOT_DIR,
   STATE_DIR,
   HARNESS_BIN,
-  WORKSPACE_DIR,
   AGENT_TIMEOUT_MS,
   SCRIPTS_DIR,
-} = require("./config");
-// CHAT_ID kept for backward compat migration of polls without chatId
-const { sendToTeams } = require("./teams-io");
-const { buildSessionMetadata, coerceAlolaMetadata } = require("./alola-session");
+  loadChannels,
+  resolveWorkspace,
+  workspaceFromPersisted,
+  attachWorkspace,
+  channelDefaultModel,
+  channelAlolaDefaultModel,
+  channelMaxConcurrentAgents,
+  buildHarnessEnv,
+} = require("../config/env");
+const { sendToTeams } = require("../teams/io");
+const { buildSessionMetadata, coerceAlolaMetadata } = require("../alola/session");
 
 const POLLS_FILE = path.join(STATE_DIR || ROOT_DIR, "polls.json");
 const DEFAULT_MAX_RUNS = 20;
@@ -36,6 +42,29 @@ function parsePollCommand(text) {
   const intervalMs = parseInterval(match[1]);
   if (!intervalMs) return null;
   return { intervalStr: match[1], intervalMs, prompt: match[2].trim() };
+}
+
+function channelForChat(chatId) {
+  return loadChannels().find((channel) => channel.chatId === chatId) || {
+    chatId: chatId || CHAT_ID || null,
+    label: chatId || "Default",
+    prefix: require("../config/env").AGENT_PREFIX,
+    defaultModel: null,
+    alolaDefaultModel: null,
+    workspace: null,
+    maxConcurrentAgents: null,
+  };
+}
+
+function normalizeChannelInput(channelOrChatId) {
+  return typeof channelOrChatId === "object" && channelOrChatId !== null
+    ? channelOrChatId
+    : channelForChat(channelOrChatId || CHAT_ID || null);
+}
+
+function workspaceForPollRecord(record, channel) {
+  if (record.workspaceDir) return workspaceFromPersisted(record.workspaceId, record.workspaceDir, record.workspaceSource || "poll");
+  return resolveWorkspace(channel || channelForChat(record.chatId || CHAT_ID || null));
 }
 
 function pollBelongsToChat(poll, chatId) {
@@ -62,6 +91,7 @@ function hasPollResultThread(messageId, chatId) {
 function savePollsToDisk() {
   const data = [];
   for (const [id, poll] of polls) {
+    if (!poll.workspaceDir) attachWorkspace(poll, workspaceForPollRecord(poll, channelForChat(poll.chatId || CHAT_ID || null)));
     const resultThreadIds = [];
     for (const [resultThreadId, pId] of pollResultThreads) {
       if (pId === id) resultThreadIds.push(resultThreadMessageId(resultThreadId));
@@ -69,6 +99,9 @@ function savePollsToDisk() {
     data.push({
       id,
       chatId: poll.chatId || null,
+      workspaceId: poll.workspaceId || null,
+      workspaceDir: poll.workspaceDir || null,
+      workspaceSource: poll.workspaceSource || null,
       prompt: poll.prompt,
       harnessArgs: poll.harnessArgs || undefined,
       intervalMs: poll.intervalMs,
@@ -76,6 +109,9 @@ function savePollsToDisk() {
       sessionId: poll.sessionId,
       harnessSessionId: poll.harnessSessionId || null,
       model: poll.model || null,
+      defaultModel: poll.defaultModel || null,
+      alolaDefaultModel: poll.alolaDefaultModel || null,
+      maxConcurrentAgents: poll.maxConcurrentAgents || null,
       alola: coerceAlolaMetadata(poll.alola, poll) || null,
       fresh: !!poll.fresh,
       from: poll.from,
@@ -97,56 +133,68 @@ function loadPollsFromDisk() {
     const data = JSON.parse(fs.readFileSync(POLLS_FILE, "utf8"));
     for (const p of data) {
       const chatId = p.chatId || CHAT_ID || null;
+      const channel = channelForChat(chatId);
+      const workspace = workspaceForPollRecord(p, channel);
       if (p.resultThreadIds) {
         for (const msgId of p.resultThreadIds) {
           rememberPollResultThread(chatId, msgId, p.id);
         }
       }
-      if (!p.active) {
-        polls.set(p.id, { ...p, chatId, busy: false });
-        continue;
-      }
-      polls.set(p.id, {
+      const poll = attachWorkspace({
         ...p,
         chatId,
+        defaultModel: p.defaultModel || channelDefaultModel(channel),
+        alolaDefaultModel: p.alolaDefaultModel || channelAlolaDefaultModel(channel),
+        maxConcurrentAgents: p.maxConcurrentAgents || channelMaxConcurrentAgents(channel),
         busy: false,
-      });
+      }, workspace);
+      polls.set(p.id, poll);
     }
     const activeCount = [...polls.values()].filter((p) => p.active).length;
     console.log(`[Polls] Loaded ${activeCount} active polls (${polls.size} total) from disk`);
     scheduleNextTick();
-  } catch {}
+  } catch (err) {
+    console.error("[Polls] Failed to load polls:", err.message);
+  }
 }
 
-function createPoll(chatId, text, from, originThreadId) {
+function createPoll(channelOrChatId, text, from, originThreadId) {
+  const channel = normalizeChannelInput(channelOrChatId);
+  const chatId = channel.chatId;
   const parsed = parsePollCommand(text);
   if (!parsed) return false;
 
-  const agentSpawn = require("./agent-spawn");
+  const agentSpawn = require("../agents/spawn");
   const { flags, harnessArgs, prompt } = agentSpawn.extractFlags(parsed.prompt);
 
-  // Detect --fresh as a cron-specific option (consumed here, not forwarded to harness)
   const freshIdx = harnessArgs.indexOf("--fresh");
   const fresh = freshIdx !== -1;
   if (fresh) harnessArgs.splice(freshIdx, 1);
 
-  const threadInfo = {};
+  const threadInfo = {
+    defaultModel: channelDefaultModel(channel),
+    alolaDefaultModel: channelAlolaDefaultModel(channel),
+  };
   const stickyArgs = agentSpawn.applyStickyOptions(threadInfo, harnessArgs);
 
   const id = randomUUID().slice(0, 8);
   const pollSessionId = randomUUID();
+  const workspace = resolveWorkspace(channel);
   const alola = flags.alola
     ? buildSessionMetadata({ rootMessageId: `poll-${id}`, sessionId: pollSessionId }, flags.alola)
     : null;
-  const poll = {
+  const poll = attachWorkspace({
     id,
     chatId,
-    prompt: prompt,
+    prompt,
     harnessArgs: stickyArgs.length > 0 ? stickyArgs : undefined,
     intervalMs: parsed.intervalMs,
     intervalStr: parsed.intervalStr,
     sessionId: pollSessionId,
     model: threadInfo.model || null,
+    defaultModel: threadInfo.defaultModel || null,
+    alolaDefaultModel: threadInfo.alolaDefaultModel || null,
+    maxConcurrentAgents: channelMaxConcurrentAgents(channel),
     alola,
     fresh,
     from,
@@ -157,12 +205,12 @@ function createPoll(chatId, text, from, originThreadId) {
     runCount: 0,
     maxRuns: DEFAULT_MAX_RUNS,
     originThreadId,
-  };
+  }, workspace);
 
   polls.set(id, poll);
   savePollsToDisk();
 
-  console.log(`[Poll ${id}] Created: every ${parsed.intervalStr}, max ${poll.maxRuns} runs, model: ${poll.model || "default"}, fresh: ${fresh}, prompt: "${poll.prompt.slice(0, 60)}"`);
+  console.log(`[Poll ${id}] Created: every ${parsed.intervalStr}, max ${poll.maxRuns} runs, model: ${poll.model || "default"}, workspace: ${poll.workspaceId}, fresh: ${fresh}, prompt: "${poll.prompt.slice(0, 60)}"`);
 
   const modelLine = poll.model ? `<b>Model:</b> ${poll.model}<br>` : "";
   const freshLine = fresh ? `<b>Mode:</b> fresh (no session memory across runs)<br>` : "";
@@ -171,6 +219,7 @@ function createPoll(chatId, text, from, originThreadId) {
       `<b>Interval:</b> every ${parsed.intervalStr}<br>` +
       modelLine +
       freshLine +
+      `<b>Workspace:</b> <code>${poll.workspaceDir}</code><br>` +
       `<b>Max runs:</b> ${poll.maxRuns}<br>` +
       `<b>Prompt:</b> ${poll.prompt.slice(0, 200)}<br><br>` +
       `First run starting now. Results will be posted as new threads.<br>` +
@@ -244,43 +293,49 @@ function runPoll(poll) {
     return;
   }
 
+  const workspace = workspaceForPollRecord(poll, channelForChat(poll.chatId));
+  attachWorkspace(poll, workspace);
   poll.busy = true;
   poll.runCount++;
   poll.lastRun = new Date().toISOString();
 
   console.log(`[Poll ${poll.id}] Run ${poll.runCount}/${poll.maxRuns}: "${poll.prompt.slice(0, 60)}"`);
 
-
   const { spawn } = require("child_process");
-  const agentSpawn = require("./agent-spawn");
+  const agentSpawn = require("../agents/spawn");
 
   const threadInfo = poll.fresh
-    ? {
-        // Each fresh run gets its own session dir so omp can't resume the prior run
+    ? attachWorkspace({
         rootMessageId: `poll-${poll.id}-${poll.runCount}`,
         sessionId: randomUUID(),
         harnessSessionId: null,
         isFollowUp: false,
         model: poll.model || undefined,
+        defaultModel: poll.defaultModel || undefined,
+        alolaDefaultModel: poll.alolaDefaultModel || undefined,
         alola: coerceAlolaMetadata(poll.alola, { rootMessageId: `poll-${poll.id}-${poll.runCount}`, sessionId: poll.sessionId }) || undefined,
-      }
-    : {
+      }, workspace)
+    : attachWorkspace({
         rootMessageId: `poll-${poll.id}`,
         sessionId: poll.sessionId,
         harnessSessionId: poll.harnessSessionId || null,
         isFollowUp: poll.runCount > 1,
         model: poll.model || undefined,
+        defaultModel: poll.defaultModel || undefined,
+        alolaDefaultModel: poll.alolaDefaultModel || undefined,
         alola: coerceAlolaMetadata(poll.alola, { rootMessageId: `poll-${poll.id}`, sessionId: poll.sessionId }) || undefined,
-      };
+      }, workspace);
 
   const stickyArgs = agentSpawn.applyStickyOptions(threadInfo, poll.harnessArgs || []);
   const args = agentSpawn.prepareHarnessArgs(
-    agentSpawn.buildHarnessArgs(threadInfo, poll.prompt, stickyArgs)
+    agentSpawn.buildHarnessArgs(threadInfo, poll.prompt, stickyArgs),
+    workspace
   );
   savePollsToDisk();
+  const includeAlola = Boolean(agentSpawn.defaultModelForPrompt(threadInfo, poll.prompt) && threadInfo.alola) || agentSpawn.promptNeedsAlola(poll.prompt) || Boolean(threadInfo.alola);
   const proc = spawn(HARNESS_BIN, args, {
-    cwd: WORKSPACE_DIR,
-    env: { ...process.env },
+    cwd: workspace.dir,
+    env: buildHarnessEnv({ includeAlola }),
     stdio: ["ignore", "pipe", "pipe"],
   });
 
@@ -299,18 +354,16 @@ function runPoll(poll) {
     poll.busy = false;
 
     if (!poll.fresh) {
-      const sid = agentSpawn.finalizeSession(agentSpawn.threadSessionDir(`poll-${poll.id}`));
+      const sid = agentSpawn.finalizeThreadSession(threadInfo, `poll-${poll.id}`);
       if (sid) poll.harnessSessionId = sid;
     } else {
-      // Finalize the per-run dir so .tmp files become .jsonl, but don't store the id
-      agentSpawn.finalizeSession(agentSpawn.threadSessionDir(`poll-${poll.id}-${poll.runCount}`));
+      agentSpawn.finalizeThreadSession(threadInfo, `poll-${poll.id}-${poll.runCount}`);
     }
 
     const result = stdout || stderr || "(no output)";
     console.log(`[Poll ${poll.id}] Done run ${poll.runCount}/${poll.maxRuns} (exit ${code}, ${result.length} chars)`);
 
-    const { markdownToHtml } = require("./teams-io");
-    const remaining = poll.maxRuns - poll.runCount;
+    const { markdownToHtml } = require("../teams/io");
     const header =
       `🔄 <b>Poll: ${poll.id}</b> (every ${poll.intervalStr}, run ${poll.runCount}/${poll.maxRuns})<br><hr>`;
 
@@ -399,11 +452,14 @@ function getPolls() {
 }
 
 module.exports = {
+  parseInterval,
   parsePollCommand,
   createPoll,
   cancelPoll,
   restartPoll,
   loadPollsFromDisk,
+  savePollsToDisk,
+  runPoll,
   getPolls,
   getPollForResultThread,
   getPollsForChat,
