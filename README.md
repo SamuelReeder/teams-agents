@@ -1,6 +1,6 @@
 # Teams Agents
 
-Microsoft Teams bot that dispatches an Oh My Pi/Claude-compatible harness from Teams chats. It supports one-chat setup through `TEAMS_CHAT_ID`, multi-chat configuration with per-chat workspaces and model defaults, recurring polls, persistent Teams threads, Docker deployment, and optional Alola remote execution routing.
+Microsoft Teams bot that dispatches an Oh My Pi/Claude-compatible harness from Teams chats. It uses `config/channels.json` as the single source of truth for monitored chats, with per-chat workspaces and model defaults, recurring polls, persistent Teams threads, Docker deployment, and optional Alola remote execution routing.
 
 ## Repository layout
 
@@ -41,18 +41,16 @@ Microsoft Teams bot that dispatches an Oh My Pi/Claude-compatible harness from T
 npm ci
 ```
 
-2. Copy the environment template and fill in the required values:
+2. Copy the templates and fill in the required values:
 
 ```bash
 cp config/env.example .env
+cp config/channels.example.json config/channels.json
 ```
 
-At minimum, set:
-
-```bash
-TEAMS_CHAT_ID=19:your-chat-id@thread.skype
-HARNESS_BIN=/absolute/path/to/omp   # or leave unset if omp is on PATH
-```
+At minimum:
+- set one `chatId` entry in `config/channels.json`
+- set `HARNESS_BIN` in `.env`, or leave it unset if `omp` is on `PATH`
 
 3. Authenticate the Microsoft Teams helper scripts used by your `TEAMS_SCRIPTS_DIR` installation:
 
@@ -84,15 +82,9 @@ npm start
 
 Dashboard: `http://localhost:3978/`.
 
-## Multi-chat configuration
+## Channel configuration
 
-The preferred channel file is `config/channels.json`. Set `APP_CHANNELS_FILE` to use another path. For backward compatibility, root `channels.json` is still used when `config/channels.json` does not exist.
-
-Create `config/channels.json` from the example:
-
-```bash
-cp config/channels.example.json config/channels.json
-```
+`config/channels.json` is the only runtime source for monitored Teams chats. There is no `TEAMS_CHAT_ID` fallback and the legacy root `channels.json` file is intentionally ignored by the app. Keep one-chat and multi-chat deployments in the same file shape.
 
 Each channel can set its own workspace, model defaults, and concurrency:
 
@@ -168,11 +160,13 @@ Compose defaults are portable:
 
 - state: `teams_state:/app/state`
 - logs: `teams_logs:/app/logs`
+- channel config: `./config/channels.json:/app/config/channels.json:ro`
 - workspace: `${HOST_WORKSPACE_DIR:-./workspace}:${APP_WORKSPACE_DIR:-/app/workspace}`
 - optional durable workspace source roots: `teams_workspace_repos` and `teams_workspace_worktrees`
 - home: `${HOST_HOME_DIR:-teams_home}:/home/${APP_USER:-teamsbot}`
 - Alola key: Docker secret `alola_ssh_key`, sourced from `${ALOLA_SSH_KEY_SOURCE:-./secrets/alola_ssh_key}` and mounted at `/run/secrets/alola_ssh_key`
 
+Compose uses `.env` for variable interpolation but does not pass the entire `.env` file into the container. Runtime channel identity remains `config/channels.json`; deprecated values like `TEAMS_CHAT_ID` are ignored.
 The base compose file does not mount a host Docker socket or run privileged.
 
 ## Alola routing

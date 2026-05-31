@@ -38,6 +38,17 @@ describe("Docker deployment config", () => {
     assert.equal(entries.includes("config/channels.json"), true);
   });
 
+  it("mounts config/channels.json as the single channel source of truth", () => {
+    const compose = readText("compose.yaml");
+    assert.ok(compose.includes("./config/channels.json:/app/config/channels.json:ro"));
+  });
+
+  it("does not pass .env wholesale as a second channel source", () => {
+    const compose = readText("compose.yaml");
+    assert.equal(compose.includes("env_file:"), false);
+    assert.equal(compose.includes("TEAMS_CHAT_ID"), false);
+  });
+
   it("excludes workspace-local clones from the Docker build context", () => {
     const entries = ignoredEntries();
 

@@ -2,7 +2,6 @@ const { randomUUID } = require("crypto");
 const fs = require("fs");
 const path = require("path");
 const {
-  CHAT_ID,
   ROOT_DIR,
   STATE_DIR,
   HARNESS_BIN,
@@ -45,8 +44,15 @@ function parsePollCommand(text) {
 }
 
 function channelForChat(chatId) {
-  return loadChannels().find((channel) => channel.chatId === chatId) || {
-    chatId: chatId || CHAT_ID || null,
+  try {
+    const channels = loadChannels();
+    const channel = channels.find((entry) => entry.chatId === chatId);
+    if (channel) return channel;
+  } catch (err) {
+    if (!/Channel config file does not exist/.test(err.message)) throw err;
+  }
+  return {
+    chatId: chatId || null,
     label: chatId || "Default",
     prefix: require("../config/env").AGENT_PREFIX,
     defaultModel: null,
@@ -59,16 +65,16 @@ function channelForChat(chatId) {
 function normalizeChannelInput(channelOrChatId) {
   return typeof channelOrChatId === "object" && channelOrChatId !== null
     ? channelOrChatId
-    : channelForChat(channelOrChatId || CHAT_ID || null);
+    : channelForChat(channelOrChatId || null);
 }
 
 function workspaceForPollRecord(record, channel) {
   if (record.workspaceDir) return workspaceFromPersisted(record.workspaceId, record.workspaceDir, record.workspaceSource || "poll");
-  return resolveWorkspace(channel || channelForChat(record.chatId || CHAT_ID || null));
+  return resolveWorkspace(channel || channelForChat(record.chatId || null));
 }
 
 function pollBelongsToChat(poll, chatId) {
-  return (poll.chatId || CHAT_ID || null) === (chatId || null);
+  return (poll.chatId || null) === (chatId || null);
 }
 
 function resultThreadKey(chatId, messageId) {
@@ -91,7 +97,7 @@ function hasPollResultThread(messageId, chatId) {
 function savePollsToDisk() {
   const data = [];
   for (const [id, poll] of polls) {
-    if (!poll.workspaceDir) attachWorkspace(poll, workspaceForPollRecord(poll, channelForChat(poll.chatId || CHAT_ID || null)));
+    if (!poll.workspaceDir) attachWorkspace(poll, workspaceForPollRecord(poll, channelForChat(poll.chatId || null)));
     const resultThreadIds = [];
     for (const [resultThreadId, pId] of pollResultThreads) {
       if (pId === id) resultThreadIds.push(resultThreadMessageId(resultThreadId));
@@ -132,7 +138,7 @@ function loadPollsFromDisk() {
   try {
     const data = JSON.parse(fs.readFileSync(POLLS_FILE, "utf8"));
     for (const p of data) {
-      const chatId = p.chatId || CHAT_ID || null;
+      const chatId = p.chatId || null;
       const channel = channelForChat(chatId);
       const workspace = workspaceForPollRecord(p, channel);
       if (p.resultThreadIds) {

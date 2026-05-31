@@ -9,8 +9,6 @@ services:
         APP_GID: ${APP_GID:-1000}
     image: ${TEAMS_BOT_IMAGE:-teams-bot:latest}
     restart: unless-stopped
-    env_file:
-      - .env
     environment:
       HOME: /home/${APP_USER:-teamsbot}
       PORT: ${PORT:-3978}
@@ -30,6 +28,7 @@ services:
     volumes:
       - teams_state:/app/state
       - teams_logs:/app/logs
+      - ./config/channels.json:/app/config/channels.json:ro
       - ${HOST_WORKSPACE_DIR:-./workspace}:${APP_WORKSPACE_DIR:-/app/workspace}
       - teams_workspace_repos:${APP_WORKSPACE_DIR:-/app/workspace}/repos
       - teams_workspace_worktrees:${APP_WORKSPACE_DIR:-/app/workspace}/worktrees

@@ -146,9 +146,15 @@ app.listen(PORT, () => {
   console.log(`Alola default model: ${HARNESS_CONFIG.alolaDefaultModel || "(none)"}`);
   console.log(`Poll interval: ${POLL_INTERVAL}ms | Max concurrent agents: ${MAX_CONCURRENT_AGENTS} | Agent timeout: ${(AGENT_TIMEOUT_MS / 60000).toFixed(0)}m`);
 
-  const channels = loadChannels();
+  let channels;
+  try {
+    channels = loadChannels();
+  } catch (err) {
+    console.error(`ERROR: ${redactSecrets(err.message)}`);
+    process.exit(1);
+  }
   if (channels.length === 0) {
-    console.error("ERROR: Set TEAMS_CHAT_ID in .env or create config/channels.json");
+    console.error("ERROR: config/channels.json must contain at least one Teams channel.");
     process.exit(1);
   }
 

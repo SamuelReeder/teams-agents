@@ -6,6 +6,8 @@ const {
   HARNESS_BIN,
   HARNESS_SECRET_ENV,
   REPLY_SCRIPT,
+  CHANNELS_FILE,
+  ROOT_DIR,
   SCRIPTS_DIR,
   buildHarnessEnv,
   loadChannels,
@@ -66,6 +68,19 @@ function validateTeamsScripts(errors) {
   }
 }
 
+function warnIgnoredChannelSources(warnings) {
+  if (process.env.TEAMS_CHAT_ID) {
+    pushWarning(warnings, "TEAMS_CHAT_ID is ignored; config/channels.json is the single channel source of truth.");
+  }
+  if (process.env.APP_CHANNELS_FILE) {
+    pushWarning(warnings, "APP_CHANNELS_FILE is ignored; config/channels.json is the single channel source of truth.");
+  }
+  const legacyFile = path.join(ROOT_DIR, "channels.json");
+  if (legacyFile !== CHANNELS_FILE && fs.existsSync(legacyFile)) {
+    pushWarning(warnings, "Root channels.json is ignored; move channel entries to config/channels.json.");
+  }
+}
+
 function validateChannelsAndWorkspaces(errors) {
   let channels;
   try {
@@ -74,7 +89,7 @@ function validateChannelsAndWorkspaces(errors) {
     pushError(errors, err.message);
     return [];
   }
-  if (channels.length === 0) pushError(errors, "No Teams channels configured. Set TEAMS_CHAT_ID or create config/channels.json.");
+  if (channels.length === 0) pushError(errors, "No Teams channels configured. Add at least one entry to config/channels.json.");
   for (const channel of channels) {
     try {
       resolveWorkspace(channel);
@@ -127,6 +142,7 @@ function validateHarnessSecrets(errors) {
 function runCheck() {
   const errors = [];
   const warnings = [];
+  warnIgnoredChannelSources(warnings);
   validateChannelsAndWorkspaces(errors);
   validateTeamsScripts(errors);
   validateHarness(errors);

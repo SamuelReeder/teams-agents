@@ -122,13 +122,13 @@ describe("harness environment exposure", () => {
     const env = buildHarnessEnv({
       env: {
         PATH: "/usr/bin",
-        TEAMS_CHAT_ID: "chat-id",
+        TEAMS_REFRESH_TOKEN: "refresh-token",
         TEAMS_ACCESS_TOKEN: "teams-token",
         MICROSOFT_CLIENT_SECRET: "client-secret",
       },
     });
 
-    assert.equal(env.TEAMS_CHAT_ID, undefined);
+    assert.equal(env.TEAMS_REFRESH_TOKEN, undefined);
     assert.equal(env.TEAMS_ACCESS_TOKEN, undefined);
     assert.equal(env.MICROSOFT_CLIENT_SECRET, undefined);
   });

@@ -2,7 +2,6 @@ const { randomUUID } = require("crypto");
 const fs = require("fs");
 const path = require("path");
 const {
-  CHAT_ID,
   MAX_CONCURRENT_AGENTS,
   ROOT_DIR,
   STATE_DIR,
@@ -29,21 +28,26 @@ const processedMessageIds = new Set();
 const channelState = new Map();
 
 function threadKey(chatId, rootMessageId) {
-  return `${chatId || CHAT_ID || "default"}::${rootMessageId}`;
+  return `${chatId || "default"}::${rootMessageId}`;
 }
 
 function processedMessageKey(chatId, messageId) {
-  return `${chatId || CHAT_ID || "default"}::${messageId}`;
+  return `${chatId || "default"}::${messageId}`;
 }
 
 function getChannelConfig(chatId) {
-  const channels = loadChannels();
-  return channels.find((ch) => ch.chatId === chatId) || null;
+  try {
+    const channels = loadChannels();
+    return channels.find((ch) => ch.chatId === chatId) || null;
+  } catch (err) {
+    if (/Channel config file does not exist/.test(err.message)) return null;
+    throw err;
+  }
 }
 
 function fallbackChannel(chatId) {
   return getChannelConfig(chatId) || {
-    chatId: chatId || CHAT_ID || null,
+    chatId: chatId || null,
     label: chatId || "Default",
     prefix: AGENT_PREFIX,
     defaultModel: null,
@@ -112,7 +116,7 @@ function loadThreadsFromDisk() {
       const age = now - new Date(t.startTime).getTime();
       if (age > THREAD_TTL_MS) continue;
 
-      const chatId = t.chatId || CHAT_ID || null;
+      const chatId = t.chatId || null;
       const channel = fallbackChannel(chatId);
       const workspace = workspaceForPersistedThread(t, chatId);
       let harnessSessionId = t.harnessSessionId;
@@ -500,7 +504,7 @@ function handleThreadReply(threadInfo) {
 }
 
 function handlePollResultReply(poll, from, messageId, rootMessageId) {
-  const chatId = poll.chatId || CHAT_ID || null;
+  const chatId = poll.chatId || null;
   const key = threadKey(chatId, rootMessageId);
   processedMessageIds.add(processedMessageKey(chatId, messageId));
 

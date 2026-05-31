@@ -129,8 +129,18 @@ describe("channel validation", () => {
     fs.writeFileSync(file, "[{ bad json");
 
     assert.throws(
-      () => loadChannels({ reload: true, env: { APP_CHANNELS_FILE: file } }),
+      () => loadChannels({ reload: true, file }),
       /Failed to parse/
+    );
+  });
+
+  it("fails when the single channel config file is missing", () => {
+    const root = tempDir();
+    const file = path.join(root, "missing-channels.json");
+
+    assert.throws(
+      () => loadChannels({ reload: true, file }),
+      /Channel config file does not exist/
     );
   });
 });

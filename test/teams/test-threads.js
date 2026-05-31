@@ -2,7 +2,7 @@ const { describe, it } = require("node:test");
 const assert = require("node:assert/strict");
 const { isBotMessage, agentResponseIds } = require("../../src/teams/io");
 const { classifyCommand, isAgentInvocation, commandTextForMessage, agentTextForMessage, collectThreadMessages, buildHelpMessage, listCronTasks, listWorkspaceCommands, listWorkspaceSkills } = require("../../src/teams/threads");
-const { AGENT_PREFIX, loadChannels } = require("../../src/config/env");
+const { AGENT_PREFIX, validateChannels } = require("../../src/config/env");
 const { getPolls } = require("../../src/polls/polls");
 
 function msg(content, from = "Reeder, Samuel") {
@@ -142,9 +142,9 @@ describe("Teams command routing", () => {
     assert.equal(agentTextForMessage(prefixedChannel, "!agents hello"), null);
   });
 
-  it("uses the global agent prefix for every configured channel", () => {
-    const channels = loadChannels();
-    assert.ok(channels.length > 0, "test expects configured Teams channels");
+  it("applies the global agent prefix to parsed channel entries", () => {
+    const channels = validateChannels([{ chatId: "chat-a" }, { chatId: "chat-b", label: "B" }], "channels");
+
     for (const channel of channels) {
       assert.equal(channel.prefix, AGENT_PREFIX);
     }

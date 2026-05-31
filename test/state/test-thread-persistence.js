@@ -246,11 +246,10 @@ describe("loadThreadsFromDisk", () => {
     assert.equal(fs.statSync(dir).isDirectory(), true);
   });
 
-  it("defaults chatId to TEAMS_CHAT_ID for pre-migration threads", () => {
+  it("keeps missing chatId null for pre-channel-file legacy threads", () => {
     const { getThreads, loadThreadsFromDisk, threadKey } = require("../../src/teams/threads");
-    const { CHAT_ID } = require("../../src/config/env");
     const threads = getThreads();
-    const key = threadKey(CHAT_ID || null, "migration-test-1");
+    const key = threadKey(null, "migration-test-1");
 
     const testData = [
       {
@@ -270,7 +269,7 @@ describe("loadThreadsFromDisk", () => {
 
     const restored = threads.get(key);
     assert.ok(restored, "thread was restored");
-    assert.equal(restored.chatId, CHAT_ID || null, "chatId defaults to CHAT_ID for migration");
+    assert.equal(restored.chatId, null, "legacy thread remains unassigned instead of using env fallback");
 
     threads.delete(key);
   });

@@ -145,7 +145,7 @@ function resolveHarnessBin() {
 }
 
 const PORT = parseIntEnv("PORT", 3978);
-const CHAT_ID = process.env.TEAMS_CHAT_ID;
+const CHANNELS_FILE = path.join(ROOT_DIR, "config/channels.json");
 const POLL_INTERVAL = parseIntEnv("POLL_INTERVAL", 5000);
 const MAX_CONCURRENT_AGENTS = parseIntEnv("MAX_AGENTS", 3);
 const AGENT_TIMEOUT_MS = parseIntEnv("AGENT_TIMEOUT", 3600000);
@@ -286,8 +286,7 @@ const ALOLA_CONFIG = {
 
 const ALOLA_SESSION_BIN = envPath("ALOLA_SESSION_BIN", path.join(ROOT_DIR, "bin/alola-session"));
 const MCP_CONFIG = envPath("MCP_CONFIG", path.join(ROOT_DIR, "mcp/mcp-servers.json"));
-const CONFIG_CHANNELS_FILE = path.join(ROOT_DIR, "config/channels.json");
-const LEGACY_CHANNELS_FILE = path.join(ROOT_DIR, "channels.json");
+const CONFIG_CHANNELS_FILE = CHANNELS_FILE;
 
 function isAccessibleDirectory(dir) {
   try {
@@ -374,12 +373,8 @@ function channelAlolaDefaultModel(channel) {
   return channel?.alolaDefaultModel || HARNESS_CONFIG.alolaDefaultModel || channelDefaultModel(channel);
 }
 
-function resolveChannelsFile(env = process.env) {
-  const explicit = envString("APP_CHANNELS_FILE", null, env);
-  if (explicit) return { path: resolveAppPath(explicit), explicit: true };
-  if (fs.existsSync(CONFIG_CHANNELS_FILE)) return { path: CONFIG_CHANNELS_FILE, explicit: false };
-  if (fs.existsSync(LEGACY_CHANNELS_FILE)) return { path: LEGACY_CHANNELS_FILE, explicit: false };
-  return { path: CONFIG_CHANNELS_FILE, explicit: false };
+function resolveChannelsFile() {
+  return { path: CHANNELS_FILE, explicit: true };
 }
 
 function normalizeChannel(raw, index, sourceFile) {
@@ -440,31 +435,19 @@ let channelsData = null;
 
 function loadChannels(options = {}) {
   if (channelsData && !options.reload) return channelsData;
-  const selected = resolveChannelsFile(options.env || process.env);
-  if (fs.existsSync(selected.path)) {
-    let parsed;
-    try {
-      parsed = JSON.parse(fs.readFileSync(selected.path, "utf8"));
-    } catch (err) {
-      throw new Error(`Failed to parse ${selected.path}: ${err.message}`);
-    }
-    channelsData = validateChannels(parsed, selected.path);
-    return channelsData;
+  const selected = options.file
+    ? { path: resolveAppPath(options.file), explicit: true }
+    : resolveChannelsFile();
+  if (!fs.existsSync(selected.path)) {
+    throw new Error(`Channel config file does not exist: ${selected.path}. Create config/channels.json from config/channels.example.json.`);
   }
-  if (selected.explicit) throw new Error(`APP_CHANNELS_FILE does not exist: ${selected.path}`);
-  if (CHAT_ID) {
-    channelsData = [{
-      chatId: CHAT_ID,
-      label: "Default",
-      prefix: AGENT_PREFIX,
-      defaultModel: null,
-      alolaDefaultModel: null,
-      workspace: null,
-      maxConcurrentAgents: null,
-    }];
-    return channelsData;
+  let parsed;
+  try {
+    parsed = JSON.parse(fs.readFileSync(selected.path, "utf8"));
+  } catch (err) {
+    throw new Error(`Failed to parse ${selected.path}: ${err.message}`);
   }
-  channelsData = [];
+  channelsData = validateChannels(parsed, selected.path);
   return channelsData;
 }
 
@@ -549,7 +532,7 @@ function buildHarnessEnv(options = {}) {
 
 module.exports = {
   PORT,
-  CHAT_ID,
+  CHANNELS_FILE,
   POLL_INTERVAL,
   AGENT_PREFIX,
   MAX_CONCURRENT_AGENTS,
@@ -574,7 +557,6 @@ module.exports = {
   ALOLA_CONFIG,
   ALOLA_SESSION_BIN,
   CONFIG_CHANNELS_FILE,
-  LEGACY_CHANNELS_FILE,
   resolveChannelsFile,
   validateChannels,
   loadChannels,

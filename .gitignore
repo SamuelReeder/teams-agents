@@ -3,7 +3,8 @@ node_modules/
 
 # Runtime state/logs/secrets
 bot-message-ids.json
-channels.json
+/channels.json
+/config/channels.json
 polls.json
 threads.json
 /sessions/
