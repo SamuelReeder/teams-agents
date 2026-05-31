@@ -85,4 +85,21 @@ describe("Docker deployment config", () => {
     assert.ok(compose.includes("PI_STREAM_FIRST_EVENT_TIMEOUT_MS: ${PI_STREAM_FIRST_EVENT_TIMEOUT_MS:-600000}"));
     assert.ok(compose.includes("PI_STREAM_IDLE_TIMEOUT_MS: ${PI_STREAM_IDLE_TIMEOUT_MS:-600000}"));
   });
+
+  it("passes supported non-channel runtime variables explicitly", () => {
+    const compose = readText("compose.yaml");
+    for (const key of [
+      "TEAMS_SCRIPTS_DIR:",
+      "TEAMS_REPLY_SCRIPT:",
+      "HARNESS_DEFAULT_MODEL:",
+      "ALOLA_HARNESS_DEFAULT_MODEL:",
+      "ALOLA_USER:",
+      "ALOLA_DEFAULT_ASIC:",
+      "ALOLA_IMAGE_TEMPLATE:",
+      "ALOLA_COMMAND_TIMEOUT_MS:"
+    ]) {
+      assert.ok(compose.includes(key), `${key} missing from compose environment`);
+    }
+    assert.ok(compose.includes("${HOST_HOME_DIR:-${HOME}}:/home/${APP_USER:-teamsbot}"));
+  });
 });

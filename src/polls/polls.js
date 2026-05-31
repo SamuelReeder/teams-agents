@@ -133,12 +133,27 @@ function savePollsToDisk() {
   fs.writeFileSync(POLLS_FILE, JSON.stringify(data, null, 2));
 }
 
+function configuredChatIdSet() {
+  try {
+    return new Set(loadChannels().map((channel) => channel.chatId));
+  } catch (err) {
+    if (/Channel config file does not exist/.test(err.message)) return null;
+    throw err;
+  }
+}
+
 function loadPollsFromDisk() {
   if (!fs.existsSync(POLLS_FILE)) return;
   try {
     const data = JSON.parse(fs.readFileSync(POLLS_FILE, "utf8"));
+    const configuredChatIds = configuredChatIdSet();
+    let skipped = 0;
     for (const p of data) {
       const chatId = p.chatId || null;
+      if (configuredChatIds && !configuredChatIds.has(chatId)) {
+        skipped++;
+        continue;
+      }
       const channel = channelForChat(chatId);
       const workspace = workspaceForPollRecord(p, channel);
       if (p.resultThreadIds) {
@@ -157,7 +172,7 @@ function loadPollsFromDisk() {
       polls.set(p.id, poll);
     }
     const activeCount = [...polls.values()].filter((p) => p.active).length;
-    console.log(`[Polls] Loaded ${activeCount} active polls (${polls.size} total) from disk`);
+    console.log(`[Polls] Loaded ${activeCount} active polls (${polls.size} total) from disk${skipped ? `; skipped ${skipped} for unconfigured channels` : ""}`);
     scheduleNextTick();
   } catch (err) {
     console.error("[Polls] Failed to load polls:", err.message);

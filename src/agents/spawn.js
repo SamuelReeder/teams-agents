@@ -137,19 +137,38 @@ function safeSessionSegment(value) {
   return safe || "session";
 }
 
-function threadSessionDir(threadId, workspaceOrThread = null, options = {}) {
+function workspaceScopedSessionDir(threadId, workspaceOrThread = null) {
   const workspace = workspaceOrThread?.dir
     ? workspaceOrThread
     : workspaceOrThread?.workspaceDir
       ? workspaceFromPersisted(workspaceOrThread.workspaceId, workspaceOrThread.workspaceDir, workspaceOrThread.workspaceSource || "thread")
       : workspaceForThread(null);
-  const dir = path.join(SESSIONS_DIR, safeSessionSegment(workspace.id), safeSessionSegment(threadId));
-  if (options.create !== false) fs.mkdirSync(dir, { recursive: true });
-  return dir;
+  return path.join(SESSIONS_DIR, safeSessionSegment(workspace.id), safeSessionSegment(threadId));
 }
 
 function legacyThreadSessionDir(threadId) {
   return path.join(SESSIONS_DIR, safeSessionSegment(threadId));
+}
+
+function migrateLegacySessionDir(threadId, workspaceOrThread = null) {
+  const current = workspaceScopedSessionDir(threadId, workspaceOrThread);
+  const legacy = legacyThreadSessionDir(threadId);
+  if (!existingDir(legacy) || existingDir(current)) return current;
+  try {
+    fs.mkdirSync(path.dirname(current), { recursive: true });
+    fs.cpSync(legacy, current, { recursive: true, errorOnExist: false, force: false });
+  } catch (err) {
+    console.warn(`[Sessions] Failed to migrate legacy session dir ${legacy} -> ${current}: ${err.message}`);
+  }
+  return current;
+}
+
+function threadSessionDir(threadId, workspaceOrThread = null, options = {}) {
+  const dir = options.migrateLegacy === false
+    ? workspaceScopedSessionDir(threadId, workspaceOrThread)
+    : migrateLegacySessionDir(threadId, workspaceOrThread);
+  if (options.create !== false) fs.mkdirSync(dir, { recursive: true });
+  return dir;
 }
 
 function existingThreadSessionDir(threadId, workspaceOrThread = null) {
@@ -609,6 +628,7 @@ module.exports = {
   finalizeThreadSession,
   threadSessionDir,
   legacyThreadSessionDir,
+  migrateLegacySessionDir,
   existingThreadSessionDir,
   workspaceForThread,
   promptNeedsAlola,

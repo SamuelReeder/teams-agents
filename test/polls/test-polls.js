@@ -2,10 +2,11 @@ const { describe, it, beforeEach, afterEach } = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("fs");
 const path = require("path");
-const { ROOT_DIR, STATE_DIR, resolveWorkspace } = require("../../src/config/env");
+const { ROOT_DIR, STATE_DIR, resolveWorkspace, loadChannels, resetChannelsForTests } = require("../../src/config/env");
 
 const POLLS_FILE = path.join(STATE_DIR || ROOT_DIR, "polls.json");
 let savedPollsContent = null;
+const cleanupFiles = [];
 
 beforeEach(() => {
   savedPollsContent = null;
@@ -18,6 +19,8 @@ afterEach(() => {
   } else if (fs.existsSync(POLLS_FILE)) {
     fs.unlinkSync(POLLS_FILE);
   }
+  while (cleanupFiles.length) fs.rmSync(cleanupFiles.pop(), { recursive: true, force: true });
+  resetChannelsForTests();
 });
 
 // Parse tests keep pure logic inline to avoid exercising module side effects;
@@ -227,6 +230,66 @@ describe("poll workspace persistence", () => {
       assert.equal(entry.workspaceDir, workspace.dir);
     } finally {
       polls.delete(id);
+    }
+  });
+
+  it("does not restore polls for chats removed from config/channels.json", () => {
+    const { getPolls, loadPollsFromDisk, pollResultThreads } = require("../../src/polls/polls");
+    const polls = getPolls();
+    const configDir = fs.mkdtempSync(path.join(require("os").tmpdir(), "teams-bot-poll-config-"));
+    cleanupFiles.push(configDir);
+    const channelsFile = path.join(configDir, "channels.json");
+    fs.writeFileSync(channelsFile, JSON.stringify([{ chatId: "chat-a", label: "A" }]));
+    loadChannels({ reload: true, file: channelsFile });
+
+    fs.writeFileSync(POLLS_FILE, JSON.stringify([
+      {
+        id: "poll-kept",
+        chatId: "chat-a",
+        prompt: "keep",
+        intervalMs: 3600000,
+        intervalStr: "1h",
+        sessionId: "sess-a",
+        from: "Tester",
+        createdAt: new Date().toISOString(),
+        lastRun: null,
+        active: true,
+        runCount: 0,
+        maxRuns: 20,
+        resultThreadIds: ["result-a"]
+      },
+      {
+        id: "poll-removed",
+        chatId: "chat-b",
+        prompt: "remove",
+        intervalMs: 3600000,
+        intervalStr: "1h",
+        sessionId: "sess-b",
+        from: "Tester",
+        createdAt: new Date().toISOString(),
+        lastRun: null,
+        active: true,
+        runCount: 0,
+        maxRuns: 20,
+        resultThreadIds: ["result-b"]
+      }
+    ]));
+
+    try {
+      polls.delete("poll-kept");
+      polls.delete("poll-removed");
+      pollResultThreads.clear();
+
+      loadPollsFromDisk();
+
+      assert.ok(polls.has("poll-kept"));
+      assert.equal(polls.has("poll-removed"), false);
+      assert.equal(pollResultThreads.has(`chat-a\0result-a`), true);
+      assert.equal(pollResultThreads.has(`chat-b\0result-b`), false);
+    } finally {
+      polls.delete("poll-kept");
+      polls.delete("poll-removed");
+      pollResultThreads.clear();
     }
   });
 });

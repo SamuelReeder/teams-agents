@@ -246,6 +246,23 @@ describe("loadThreadsFromDisk", () => {
     assert.equal(fs.statSync(dir).isDirectory(), true);
   });
 
+  it("copies legacy session directories into workspace-scoped session directories", () => {
+    const { threadSessionDir } = require("../../src/agents/spawn");
+    const workspace = resolveWorkspace();
+    const threadId = "legacy-copy-thread";
+    const legacyDir = path.join(SESSIONS_DIR, threadId);
+    const scopedRoot = path.join(SESSIONS_DIR, workspace.id);
+    const sessionFile = "session_aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.jsonl";
+    fs.mkdirSync(legacyDir, { recursive: true });
+    cleanupPaths.push(legacyDir, scopedRoot);
+    fs.writeFileSync(path.join(legacyDir, sessionFile), "{}\n");
+
+    const dir = threadSessionDir(threadId, workspace);
+
+    assert.equal(dir, path.join(scopedRoot, threadId));
+    assert.equal(fs.readFileSync(path.join(dir, sessionFile), "utf8"), "{}\n");
+  });
+
   it("keeps missing chatId null for pre-channel-file legacy threads", () => {
     const { getThreads, loadThreadsFromDisk, threadKey } = require("../../src/teams/threads");
     const threads = getThreads();

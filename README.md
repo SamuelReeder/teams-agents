@@ -163,7 +163,7 @@ Compose defaults are portable:
 - channel config: `./config/channels.json:/app/config/channels.json:ro`
 - workspace: `${HOST_WORKSPACE_DIR:-./workspace}:${APP_WORKSPACE_DIR:-/app/workspace}`
 - optional durable workspace source roots: `teams_workspace_repos` and `teams_workspace_worktrees`
-- home: `${HOST_HOME_DIR:-teams_home}:/home/${APP_USER:-teamsbot}`
+- home: `${HOST_HOME_DIR:-$HOME}:/home/${APP_USER:-teamsbot}`
 - Alola key: Docker secret `alola_ssh_key`, sourced from `${ALOLA_SSH_KEY_SOURCE:-./secrets/alola_ssh_key}` and mounted at `/run/secrets/alola_ssh_key`
 
 Compose uses `.env` for variable interpolation but does not pass the entire `.env` file into the container. Runtime channel identity remains `config/channels.json`; deprecated values like `TEAMS_CHAT_ID` are ignored.
