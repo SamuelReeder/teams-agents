@@ -31,38 +31,81 @@ Microsoft Teams bot that dispatches an Oh My Pi/Claude-compatible harness from T
 └── compose.yaml
 ```
 
+Prerequisite: this app shells out to Microsoft Teams helper scripts from the `m365-teams` Claude skill (`auth.py`, `list_messages.py`, `send_chat.py`). Make those scripts and their auth state readable wherever the bot runs: mount a prepared home/scripts directory into the container for Docker Compose, or install/authenticate them on the host for local npm runs. Set `TEAMS_SCRIPTS_DIR`/`TEAMS_REPLY_SCRIPT` if you use equivalent scripts elsewhere.
 
+## Quick start: Docker Compose
 
-Prerequisite: this app shells out to Microsoft Teams helper scripts from the `m365-teams` Claude skill (`auth.py`, `list_messages.py`, `send_chat.py`). Install/authenticate that skill on the host or set `TEAMS_SCRIPTS_DIR`/`TEAMS_REPLY_SCRIPT` to equivalent scripts before running `npm run setup:check`.
+Use Docker Compose as the default path. It makes the runtime boundary explicit: the bot, state, logs, secrets, and mounted workspace are the same shape as a deployed instance.
 
-## Quick start: one Teams chat
-
-1. Install dependencies:
-
-```bash
-npm ci
-```
-
-2. Copy the templates and fill in the required values:
+1. Copy the templates:
 
 ```bash
 cp config/env.example .env
 cp config/channels.example.json config/channels.json
 ```
 
-At minimum:
-- set one `chatId` entry in `config/channels.json`
-- set that entry's `workspace` to your actual workspace directory
-- set `HARNESS_BIN` in `.env`, or leave it unset if `omp` is on `PATH`
+2. In `.env`, set the host workspace to mount and the path the bot should use inside the container:
 
-3. Authenticate the Microsoft Teams helper scripts used by your `TEAMS_SCRIPTS_DIR` installation:
+```bash
+HOST_WORKSPACE_DIR=/absolute/host/path/to/my-workspace
+APP_WORKSPACE_DIR=/app/workspace
+HARNESS_BIN=omp
+```
+
+Set `HARNESS_BIN` to the harness command or absolute path visible inside the container. If the container should use Teams auth files, helper scripts, or harness binaries from your host home directory, also set `HOST_HOME_DIR=/home/you`.
+
+3. Fill out `config/channels.json`. For one Docker-mounted workspace, the file can be:
+
+```json
+[
+  {
+    "chatId": "19:your-chat-id@thread.skype",
+    "label": "My project chat",
+    "workspace": "/app/workspace"
+  }
+]
+```
+
+`workspace` is the path seen by the bot. With the Compose settings above, `HOST_WORKSPACE_DIR` is mounted at `APP_WORKSPACE_DIR`, so channel entries should use the container path (`/app/workspace`), not the host path.
+
+4. Authenticate the Microsoft Teams helper scripts used by your `TEAMS_SCRIPTS_DIR` installation:
 
 ```bash
 python3 ~/.claude/skills/m365-teams/scripts/auth.py
 python3 ~/.claude/skills/m365-teams/scripts/auth.py --complete <device_code>
 ```
 
-4. Add your actual workspace directory:
+5. Validate the container configuration:
+
+```bash
+docker compose build
+docker compose run --rm teams-bot npm run setup:check
+```
+
+6. Start the bot:
+
+```bash
+docker compose up -d
+docker compose logs -f teams-bot
+```
+
+Dashboard: `http://localhost:3978/`.
+
+A workspace is treated as an opaque harness working directory. The bot does not require `.claude/`, `.shared/`, `repos/`, `worktrees`, or registry files to exist. If those conventional files exist, help/dashboard output may surface them; otherwise the harness simply starts with `cwd` set to the selected workspace.
+
+## Local npm run
+
+Use the host-local Node path when Docker is unavailable or when you intentionally want the bot to run directly on the host.
+
+1. Install dependencies and copy the templates if you have not already done so:
+
+```bash
+npm ci
+cp config/env.example .env
+cp config/channels.example.json config/channels.json
+```
+
+2. Fill out `config/channels.json` with a host path:
 
 ```json
 [
@@ -74,28 +117,14 @@ python3 ~/.claude/skills/m365-teams/scripts/auth.py --complete <device_code>
 ]
 ```
 
-For local non-Docker runs, use an absolute host path or `~/...`. For Docker, mount the host directory and use the container path:
+3. Set `HARNESS_BIN` in `.env`, or leave it unset if `omp` is on `PATH`.
+
+4. Authenticate Teams, validate configuration, and start:
 
 ```bash
-HOST_WORKSPACE_DIR=/host/path/to/my-workspace
-APP_WORKSPACE_DIR=/app/workspace
-```
-
-```json
-"workspace": "/app/workspace"
-```
-
-A workspace is treated as an opaque harness working directory. The bot does not require `.claude/`, `.shared/`, `repos/`, `worktrees`, or registry files to exist. If those conventional files exist, help/dashboard output may surface them; otherwise the harness simply starts with `cwd` set to the selected workspace.
-
-5. Validate configuration:
-
-```bash
+python3 ~/.claude/skills/m365-teams/scripts/auth.py
+python3 ~/.claude/skills/m365-teams/scripts/auth.py --complete <device_code>
 npm run setup:check
-```
-
-6. Start the bot:
-
-```bash
 npm start
 ```
 
