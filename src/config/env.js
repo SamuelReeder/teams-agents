@@ -19,6 +19,8 @@ function loadEnvFile(filePath) {
     const quote = value[0];
     if ((quote === "\"" || quote === "'") && value[value.length - 1] === quote) {
       value = value.slice(1, -1);
+    } else {
+      value = value.replace(/\s+#.*$/, "").trim();
     }
     process.env[name] = value;
   }
@@ -145,6 +147,7 @@ function resolveHarnessBin() {
 }
 
 const PORT = parseIntEnv("PORT", 3978);
+const BIND_HOST = envString("APP_BIND_HOST", "127.0.0.1");
 const CHANNELS_FILE = path.join(ROOT_DIR, "config/channels.json");
 const POLL_INTERVAL = parseIntEnv("POLL_INTERVAL", 5000);
 const MAX_CONCURRENT_AGENTS = parseIntEnv("MAX_AGENTS", 3);
@@ -528,6 +531,7 @@ function buildHarnessEnv(options = {}) {
 
 module.exports = {
   PORT,
+  BIND_HOST,
   CHANNELS_FILE,
   POLL_INTERVAL,
   AGENT_PREFIX,

@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - feature/configurable-workspaces-secrets
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - run: npm ci
+      - name: Prepare setup check fixtures
+        run: |
+          mkdir -p /tmp/teams-scripts
+          printf '#!/usr/bin/env python3\n' > /tmp/teams-scripts/list_messages.py
+          printf '#!/usr/bin/env python3\n' > /tmp/teams-scripts/send_chat.py
+          chmod +x /tmp/teams-scripts/list_messages.py /tmp/teams-scripts/send_chat.py
+          mkdir -p config
+          cat > config/channels.json <<'JSON'
+          [
+            {
+              "chatId": "19:ci@thread.skype",
+              "label": "CI",
+              "workspace": "."
+            }
+          ]
+          JSON
+      - run: npm test
+      - run: npm run setup:check
+        env:
+          HARNESS_BIN: /usr/bin/node
+          TEAMS_SCRIPTS_DIR: /tmp/teams-scripts
+          TEAMS_REPLY_SCRIPT: scripts/teams/reply.py
+      - run: docker compose config

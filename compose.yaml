@@ -12,6 +12,7 @@ services:
     environment:
       HOME: /home/${APP_USER:-teamsbot}
       PORT: ${PORT:-3978}
+      APP_BIND_HOST: 0.0.0.0
       POLL_INTERVAL: ${POLL_INTERVAL:-5000}
       MAX_AGENTS: ${MAX_AGENTS:-3}
       AGENT_TIMEOUT: ${AGENT_TIMEOUT:-3600000}
@@ -50,15 +51,15 @@ services:
       PI_STREAM_FIRST_EVENT_TIMEOUT_MS: ${PI_STREAM_FIRST_EVENT_TIMEOUT_MS:-600000}
       PI_STREAM_IDLE_TIMEOUT_MS: ${PI_STREAM_IDLE_TIMEOUT_MS:-600000}
     ports:
-      - "${PORT:-3978}:3978"
+      - "${HOST_BIND_ADDR:-127.0.0.1}:${PORT:-3978}:3978"
     volumes:
       - teams_state:/app/state
       - teams_logs:/app/logs
       - ./config/channels.json:/app/config/channels.json:ro
-      - ${HOST_WORKSPACE_DIR:-${HOME}}:${APP_WORKSPACE_DIR:-/app/workspace}
+      - ${HOST_WORKSPACE_DIR:-teams_workspace}:${APP_WORKSPACE_DIR:-/app/workspace}
       - teams_workspace_repos:${APP_WORKSPACE_DIR:-/app/workspace}/repos
       - teams_workspace_worktrees:${APP_WORKSPACE_DIR:-/app/workspace}/worktrees
-      - ${HOST_HOME_DIR:-${HOME}}:/home/${APP_USER:-teamsbot}
+      - ${HOST_HOME_DIR:-teams_home}:/home/${APP_USER:-teamsbot}
     secrets:
       - source: alola_ssh_key
         target: alola_ssh_key
@@ -74,6 +75,7 @@ secrets:
 volumes:
   teams_state:
   teams_logs:
+  teams_workspace:
   teams_workspace_repos:
   teams_workspace_worktrees:
   teams_home:

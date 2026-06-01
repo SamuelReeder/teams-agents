@@ -1,6 +1,7 @@
 const express = require("express");
 const {
   PORT,
+  BIND_HOST,
   POLL_INTERVAL,
   HARNESS_BIN,
   HARNESS_CONFIG,
@@ -139,8 +140,8 @@ app.get("/", (req, res) => {
 </html>`);
 });
 
-app.listen(PORT, () => {
-  console.log(`Teams agents server on http://localhost:${PORT}`);
+app.listen(PORT, BIND_HOST, () => {
+  console.log(`Teams agents server on http://${BIND_HOST}:${PORT}`);
   console.log(`Harness: ${redactSecrets(HARNESS_BIN)}`);
   console.log(`Default model: ${HARNESS_CONFIG.defaultModel || "(none)"}`);
   console.log(`Alola default model: ${HARNESS_CONFIG.alolaDefaultModel || "(none)"}`);

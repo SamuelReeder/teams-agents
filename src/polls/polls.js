@@ -6,7 +6,6 @@ const {
   STATE_DIR,
   HARNESS_BIN,
   AGENT_TIMEOUT_MS,
-  SCRIPTS_DIR,
   loadChannels,
   resolveWorkspace,
   workspaceFromPersisted,
@@ -316,6 +315,13 @@ function runPoll(poll) {
 
   const workspace = workspaceForPollRecord(poll, channelForChat(poll.chatId));
   attachWorkspace(poll, workspace);
+  const agentSpawn = require("../agents/spawn");
+  const maxConcurrent = poll.maxConcurrentAgents || channelMaxConcurrentAgents(channelForChat(poll.chatId));
+  if (!agentSpawn.acquireAgentSlot(poll, maxConcurrent)) {
+    console.log(`[Poll ${poll.id}] Deferring run because ${poll.chatId || "default"} is at concurrency limit ${maxConcurrent}`);
+    scheduleNextTick();
+    return;
+  }
   poll.busy = true;
   poll.runCount++;
   poll.lastRun = new Date().toISOString();
@@ -323,7 +329,6 @@ function runPoll(poll) {
   console.log(`[Poll ${poll.id}] Run ${poll.runCount}/${poll.maxRuns}: "${poll.prompt.slice(0, 60)}"`);
 
   const { spawn } = require("child_process");
-  const agentSpawn = require("../agents/spawn");
 
   const threadInfo = poll.fresh
     ? attachWorkspace({
@@ -354,11 +359,18 @@ function runPoll(poll) {
   );
   savePollsToDisk();
   const includeAlola = Boolean(agentSpawn.defaultModelForPrompt(threadInfo, poll.prompt) && threadInfo.alola) || agentSpawn.promptNeedsAlola(poll.prompt) || Boolean(threadInfo.alola);
-  const proc = spawn(HARNESS_BIN, args, {
-    cwd: workspace.dir,
-    env: buildHarnessEnv({ includeAlola }),
-    stdio: ["ignore", "pipe", "pipe"],
-  });
+  let proc;
+  try {
+    proc = spawn(HARNESS_BIN, args, {
+      cwd: workspace.dir,
+      env: buildHarnessEnv({ includeAlola }),
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+  } catch (err) {
+    agentSpawn.releaseAgentSlot(poll);
+    poll.busy = false;
+    throw err;
+  }
 
   let stdout = "";
   let stderr = "";
@@ -373,6 +385,7 @@ function runPoll(poll) {
   proc.on("close", (code) => {
     clearTimeout(timeout);
     poll.busy = false;
+    agentSpawn.releaseAgentSlot(poll);
 
     if (!poll.fresh) {
       const sid = agentSpawn.finalizeThreadSession(threadInfo, `poll-${poll.id}`);
@@ -388,20 +401,13 @@ function runPoll(poll) {
     const header =
       `🔄 <b>Poll: ${poll.id}</b> (every ${poll.intervalStr}, run ${poll.runCount}/${poll.maxRuns})<br><hr>`;
 
-    const { execSync } = require("child_process");
     try {
       const html = markdownToHtml ? markdownToHtml(result) : result;
       const fullMessage = `${header}${html}`;
-      const sendResult = execSync(
-        `python3 ${SCRIPTS_DIR}/send_chat.py --chat-id "${poll.chatId}" -m - --html --json`,
-        { timeout: 30000, input: fullMessage, stdio: ["pipe", "pipe", "pipe"] }
-      );
-      try {
-        const parsed = JSON.parse(sendResult.toString());
-        if (parsed.message_id) {
-          rememberPollResultThread(poll.chatId, parsed.message_id, poll.id);
-        }
-      } catch {}
+      const parsed = sendToTeams(poll.chatId, fullMessage, null, false);
+      if (parsed?.message_id) {
+        rememberPollResultThread(poll.chatId, parsed.message_id, poll.id);
+      }
     } catch (err) {
       console.error(`[Poll ${poll.id}] Failed to post result:`, err.message);
     }
@@ -413,6 +419,7 @@ function runPoll(poll) {
   proc.on("error", () => {
     clearTimeout(timeout);
     poll.busy = false;
+    agentSpawn.releaseAgentSlot(poll);
     scheduleNextTick();
   });
 }

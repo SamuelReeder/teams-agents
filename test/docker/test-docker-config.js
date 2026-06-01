@@ -101,6 +101,13 @@ describe("Docker deployment config", () => {
     ]) {
       assert.ok(compose.includes(key), `${key} missing from compose environment`);
     }
-    assert.ok(compose.includes("${HOST_HOME_DIR:-${HOME}}:/home/${APP_USER:-teamsbot}"));
+    assert.ok(compose.includes("${HOST_HOME_DIR:-teams_home}:/home/${APP_USER:-teamsbot}"));
+  });
+
+  it("uses safe Docker defaults for host filesystem and dashboard exposure", () => {
+    const compose = readText("compose.yaml");
+    assert.ok(compose.includes("${HOST_WORKSPACE_DIR:-teams_workspace}:${APP_WORKSPACE_DIR:-/app/workspace}"));
+    assert.ok(compose.includes("${HOST_HOME_DIR:-teams_home}:/home/${APP_USER:-teamsbot}"));
+    assert.ok(compose.includes("${HOST_BIND_ADDR:-127.0.0.1}:${PORT:-3978}:3978"));
   });
 });

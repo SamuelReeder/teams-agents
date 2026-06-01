@@ -32,6 +32,8 @@ Microsoft Teams bot that dispatches an Oh My Pi/Claude-compatible harness from T
 
 `server.js` remains as a short compatibility launcher; new deployments should run `node src/index.js` or `npm start`.
 
+Prerequisite: this app shells out to Microsoft Teams helper scripts from the `m365-teams` Claude skill (`auth.py`, `list_messages.py`, `send_chat.py`). Install/authenticate that skill on the host or set `TEAMS_SCRIPTS_DIR`/`TEAMS_REPLY_SCRIPT` to equivalent scripts before running `npm run setup:check`.
+
 ## Quick start: one Teams chat
 
 1. Install dependencies:
@@ -151,8 +153,9 @@ Important exposure model:
 - Harness-required LLM/provider keys are passed only by explicit allowlist. If the harness can use a key, an agent can expose or misuse it.
 - `ALOLA_SSH_KEY` is handled as a path secret. The bot passes a readable key path only to Alola-routed harness runs; it does not read private key material into logs or ordinary harness environments.
 - Docker secrets and `*_FILE` variables protect against repo/image/log leakage. They are not a sandbox boundary once a child process can read the file or value.
+- Agent output is not redacted before posting to Teams. Treat every harness-visible value as chat-visible.
 
-For stronger isolation, run the harness under a separate user/container or broker privileged operations through the bot instead of giving raw credentials to the harness.
+For stronger isolation, run the harness under a separate user/container or broker privileged operations through the bot instead of giving raw credentials to the harness. Anyone who can trigger the harness can execute code in the configured workspace; keep monitored chat membership tight.
 
 ## Docker Compose
 
@@ -176,13 +179,14 @@ Compose defaults are portable:
 - state: `teams_state:/app/state`
 - logs: `teams_logs:/app/logs`
 - channel config: `./config/channels.json:/app/config/channels.json:ro`
-- workspace: `${HOST_WORKSPACE_DIR:-$HOME}:${APP_WORKSPACE_DIR:-/app/workspace}`
+- workspace: `${HOST_WORKSPACE_DIR:-teams_workspace}:${APP_WORKSPACE_DIR:-/app/workspace}`
 - optional durable workspace source roots: `teams_workspace_repos` and `teams_workspace_worktrees`
-- home: `${HOST_HOME_DIR:-$HOME}:/home/${APP_USER:-teamsbot}`
+- home: `${HOST_HOME_DIR:-teams_home}:/home/${APP_USER:-teamsbot}`
+- dashboard port: `${HOST_BIND_ADDR:-127.0.0.1}:${PORT:-3978}:3978`
 - Alola key: Docker secret `alola_ssh_key`, sourced from `${ALOLA_SSH_KEY_SOURCE:-./secrets/alola_ssh_key}` and mounted at `/run/secrets/alola_ssh_key`
 
 Compose uses `.env` for variable interpolation but does not pass the entire `.env` file into the container. Runtime channel identity remains `config/channels.json`; deprecated values like `TEAMS_CHAT_ID` are ignored.
-The base compose file does not mount a host Docker socket or run privileged.
+The base compose file does not mount a host Docker socket, does not bind-mount host `$HOME` by default, and publishes the dashboard on host loopback by default. Set `HOST_WORKSPACE_DIR`, `HOST_HOME_DIR`, or `HOST_BIND_ADDR=0.0.0.0` only when that exposure is intentional.
 
 ## Alola routing
 

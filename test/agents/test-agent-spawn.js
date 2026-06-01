@@ -11,6 +11,9 @@ const {
   normalizeBareModel,
   buildAgentResult,
   promptNeedsAlola,
+  activeCountFor,
+  acquireAgentSlot,
+  releaseAgentSlot,
 } = require("../../src/agents/spawn");
 const { HARNESS_CONFIG, MCP_CONFIG, ALOLA_SESSION_BIN } = require("../../src/config/env");
 const { buildSessionMetadata, parseAlolaTarget } = require("../../src/alola/session");
@@ -394,6 +397,24 @@ describe("prepareHarnessArgs", () => {
       const addDirIndex = prepared.indexOf(HARNESS_CONFIG.flags.addDir);
       assert.notEqual(addDirIndex, -1);
       assert(addDirIndex < promptIndex);
+    }
+  });
+});
+
+describe("agent concurrency accounting", () => {
+  it("tracks active agents per chat instead of globally", () => {
+    const chatA = { chatId: "chat-a" };
+    const chatB = { chatId: "chat-b" };
+
+    try {
+      assert.equal(acquireAgentSlot(chatA, 1), true);
+      assert.equal(activeCountFor(chatA), 1);
+      assert.equal(acquireAgentSlot(chatA, 1), false, "same chat should respect its own cap");
+      assert.equal(acquireAgentSlot(chatB, 1), true, "other chat should not be blocked by chat A");
+      assert.equal(activeCountFor(chatB), 1);
+    } finally {
+      releaseAgentSlot(chatA);
+      releaseAgentSlot(chatB);
     }
   });
 });

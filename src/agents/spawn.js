@@ -474,7 +474,37 @@ function prepareHarnessArgs(baseArgs, workspaceOrThread = null) {
   return args;
 }
 
-let activeAgents = 0;
+const activeAgents = new Map();
+function concurrencyKey(threadInfo) {
+  return threadInfo.chatId || threadInfo.workspaceId || "default";
+}
+
+function activeCountFor(threadInfo) {
+  return activeAgents.get(concurrencyKey(threadInfo)) || 0;
+}
+
+function incrementActive(threadInfo) {
+  const key = concurrencyKey(threadInfo);
+  activeAgents.set(key, (activeAgents.get(key) || 0) + 1);
+}
+
+function decrementActive(threadInfo) {
+  const key = concurrencyKey(threadInfo);
+  const next = Math.max(0, (activeAgents.get(key) || 0) - 1);
+  if (next) activeAgents.set(key, next);
+  else activeAgents.delete(key);
+}
+
+function acquireAgentSlot(threadInfo, maxConcurrent) {
+  if (activeCountFor(threadInfo) >= maxConcurrent) return false;
+  incrementActive(threadInfo);
+  return true;
+}
+
+function releaseAgentSlot(threadInfo) {
+  decrementActive(threadInfo);
+}
+
 
 function processPending(threadInfo, replyToId, maxConcurrent) {
   if (!threadInfo.hasPending) return;
@@ -527,11 +557,6 @@ function buildAgentResult(stdout, stderr, code, wasResuming) {
 }
 
 function spawnAgent(threadInfo, message, replyToId, maxConcurrent = 3) {
-  if (activeAgents >= maxConcurrent) {
-    sendToTeams(threadInfo.chatId, `${AI_PREFIX} ⏳ Too many agents running. Please wait...`, replyToId);
-    threadInfo.busy = false;
-    return;
-  }
 
   const workspace = workspaceForThread(threadInfo);
   let parsedFlags;
@@ -556,11 +581,15 @@ function spawnAgent(threadInfo, message, replyToId, maxConcurrent = 3) {
   const wasResumingHarnessSession = Boolean(threadInfo.isFollowUp && threadInfo.harnessSessionId);
   const includeAlola = Boolean(inferAlolaTarget(threadInfo, prompt));
 
-  activeAgents++;
+  if (!acquireAgentSlot(threadInfo, maxConcurrent)) {
+    sendToTeams(threadInfo.chatId, `${AI_PREFIX} ⏳ Too many agents running. Please wait...`, replyToId);
+    threadInfo.busy = false;
+    return;
+  }
 
   const target = threadInfo.alola ? `, target: ${describeAlolaTarget(threadInfo.alola)}` : "";
   console.log(
-    `[Thread ${threadInfo.rootMessageId}] Spawning local (session: ${threadInfo.sessionId.slice(0, 8)}..., workspace: ${workspace.id}, follow-up: ${threadInfo.isFollowUp}${target}, active: ${activeAgents})`
+    `[Thread ${threadInfo.rootMessageId}] Spawning local (session: ${threadInfo.sessionId.slice(0, 8)}..., workspace: ${workspace.id}, follow-up: ${threadInfo.isFollowUp}${target}, active: ${activeCountFor(threadInfo)}/${maxConcurrent})`
   );
 
   const proc = spawn(HARNESS_BIN, harnessArgs, {
@@ -583,7 +612,7 @@ function spawnAgent(threadInfo, message, replyToId, maxConcurrent = 3) {
 
   proc.on("close", (code) => {
     clearTimeout(timeout);
-    activeAgents--;
+    releaseAgentSlot(threadInfo);
     threadInfo.busy = false;
     threadInfo.childPid = null;
 
@@ -598,7 +627,7 @@ function spawnAgent(threadInfo, message, replyToId, maxConcurrent = 3) {
     const { result, resetSession } = buildAgentResult(stdout, stderr, code, wasResumingHarnessSession);
     if (resetSession) threadInfo.harnessSessionId = null;
     persistThreadsBestEffort();
-    console.log(`[Thread ${threadInfo.rootMessageId}] Done (exit ${code}, ${result.length} chars, active: ${activeAgents})`);
+    console.log(`[Thread ${threadInfo.rootMessageId}] Done (exit ${code}, ${result.length} chars, active: ${activeCountFor(threadInfo)}/${maxConcurrent})`);
 
     sendLargeOutput(threadInfo.chatId, result, replyToId);
     processPending(threadInfo, replyToId, maxConcurrent);
@@ -606,7 +635,7 @@ function spawnAgent(threadInfo, message, replyToId, maxConcurrent = 3) {
 
   proc.on("error", (err) => {
     clearTimeout(timeout);
-    activeAgents--;
+    releaseAgentSlot(threadInfo);
     threadInfo.busy = false;
     threadInfo.childPid = null;
     console.error(`[Thread ${threadInfo.rootMessageId}] Spawn error:`, err.message);
@@ -629,6 +658,9 @@ module.exports = {
   threadSessionDir,
   legacyThreadSessionDir,
   migrateLegacySessionDir,
+  activeCountFor,
+  acquireAgentSlot,
+  releaseAgentSlot,
   existingThreadSessionDir,
   workspaceForThread,
   promptNeedsAlola,

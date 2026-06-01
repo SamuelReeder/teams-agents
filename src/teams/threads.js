@@ -299,11 +299,11 @@ function handleCommand(channel, text, from, replyToId) {
   }
 
   if (kind === "models") {
-    const { execSync } = require("child_process");
+    const { execFileSync } = require("child_process");
     const { HARNESS_BIN } = require("../config/env");
     const search = text.trim() === "!models" ? "" : text.slice("!models ".length).trim();
     try {
-      const out = execSync(`${HARNESS_BIN} --list-models=${search}`, {
+      const out = execFileSync(HARNESS_BIN, [`--list-models=${search}`], {
         timeout: 30000,
         stdio: ["ignore", "pipe", "pipe"],
       }).toString();
@@ -674,9 +674,9 @@ function pollAllChannels() {
 }
 
 function expireOldThreads() {
-  for (const [rootId, threadInfo] of threads) {
+  for (const [key, threadInfo] of threads) {
     if (Date.now() - threadInfo.startTime > THREAD_TTL_MS) {
-      threads.delete(rootId);
+      threads.delete(key);
     }
   }
 }

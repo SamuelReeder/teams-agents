@@ -9,7 +9,10 @@
   "scripts": {
     "start": "node src/index.js",
     "setup:check": "node scripts/setup.js --check",
-    "test": "node --test test/**/*.js"
+    "test": "node --test test/*/*.js"
+  },
+  "engines": {
+    "node": ">=20"
   },
   "dependencies": {
     "express": "^4.21.0",
