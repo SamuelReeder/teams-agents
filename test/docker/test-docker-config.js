@@ -98,7 +98,7 @@ describe("Docker deployment config", () => {
     assert.ok(dockerfile.includes("PATH=/home/${APP_USER}/.local/bin:/home/${APP_USER}/.bun/bin:${PATH}"));
     assert.ok(dockerfile.includes("sudo"));
     assert.ok(dockerfile.includes("/etc/sudoers.d/teams-bot"));
-    assert.ok(dockerfile.includes("chown -R \"${APP_UID}:${APP_GID}\" \"$rocm_path\""));
+    assert.equal(dockerfile.includes("chown -R \"${APP_UID}:${APP_GID}\" \"$rocm_path\""), false);
   });
 
   it("passes supported non-channel runtime variables explicitly", () => {
