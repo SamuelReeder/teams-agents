@@ -76,4 +76,4 @@ ENV NODE_ENV=production \
 EXPOSE 3978
 
 ENTRYPOINT ["/usr/bin/tini", "--"]
-CMD ["node", "src/index.js"]
+CMD ["node", "/app/src/index.js"]
