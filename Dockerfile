@@ -15,6 +15,7 @@ RUN set -eux; \
       openssh-client \
       python3 \
       python3-venv \
+      tmux \
       tini; \
     node_major="$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)"; \
     if [ "$node_major" -lt 20 ] || ! command -v npm >/dev/null 2>&1; then \
