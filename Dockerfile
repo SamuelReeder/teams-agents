@@ -2,22 +2,30 @@ ARG BASE_IMAGE=node:20-bookworm-slim
 FROM ${BASE_IMAGE}
 
 # Custom BASE_IMAGE values must be Debian/Ubuntu compatible: this app layer uses
-# apt-get for OS dependencies and installs Debian nodejs/npm packages only when
-# the base image does not already provide node/npm on PATH.
+# apt-get for OS dependencies and installs Node.js 20 from NodeSource when the
+# base image does not already provide node >=20 and npm on PATH.
 RUN set -eux; \
     apt-get update; \
-    node_packages=""; \
-    if ! command -v node >/dev/null 2>&1; then node_packages="$node_packages nodejs"; fi; \
-    if ! command -v npm >/dev/null 2>&1; then node_packages="$node_packages npm"; fi; \
     apt-get install -y --no-install-recommends \
       ca-certificates \
+      curl \
       git \
       gh \
+      gnupg \
       openssh-client \
       python3 \
       python3-venv \
-      tini \
-      $node_packages; \
+      tini; \
+    node_major="$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)"; \
+    if [ "$node_major" -lt 20 ] || ! command -v npm >/dev/null 2>&1; then \
+      mkdir -p /etc/apt/keyrings; \
+      curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
+        | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg; \
+      echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_20.x nodistro main" \
+        > /etc/apt/sources.list.d/nodesource.list; \
+      apt-get update; \
+      apt-get install -y --no-install-recommends nodejs; \
+    fi; \
     rm -rf /var/lib/apt/lists/*
 
 ARG APP_USER=teamsbot

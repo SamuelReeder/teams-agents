@@ -13,7 +13,7 @@ Microsoft Teams bot that dispatches an Oh My Pi/Claude-compatible harness from T
 │   ├── env.example
 │   └── env.alola.example
 ├── scripts/
-│   ├── alola-session.js           # compatibility launcher for old workspace wrappers
+│   ├── alola-session.js           # Alola CLI launcher
 │   ├── setup.js                   # setup/config validation
 │   └── teams/
 │       └── reply.py
@@ -24,14 +24,14 @@ Microsoft Teams bot that dispatches an Oh My Pi/Claude-compatible harness from T
 │   ├── teams/                     # Teams IO and thread handling
 │   ├── polls/                     # recurring poll scheduler
 │   ├── alola/                     # SSH/tmux/enroot/SLURM session manager
-│   └── state/                     # state store compatibility exports
+│   └── state/                     # state store exports
 ├── test/
 │   ├── agents/ config/ teams/ polls/ alola/ docker/ state/
 ├── Dockerfile
 └── compose.yaml
 ```
 
-`server.js` remains as a short compatibility launcher; new deployments should run `node src/index.js` or `npm start`.
+
 
 Prerequisite: this app shells out to Microsoft Teams helper scripts from the `m365-teams` Claude skill (`auth.py`, `list_messages.py`, `send_chat.py`). Install/authenticate that skill on the host or set `TEAMS_SCRIPTS_DIR`/`TEAMS_REPLY_SCRIPT` to equivalent scripts before running `npm run setup:check`.
 
@@ -103,7 +103,7 @@ Dashboard: `http://localhost:3978/`.
 
 ## Channel configuration
 
-`config/channels.json` is the only runtime source for monitored Teams chats. There is no `TEAMS_CHAT_ID` fallback and the legacy root `channels.json` file is intentionally ignored by the app. Keep one-chat and multi-chat deployments in the same file shape.
+`config/channels.json` is the only runtime source for monitored Teams chats. Keep one-chat and multi-chat deployments in the same file shape.
 
 Each channel can set its own workspace, model defaults, and concurrency:
 
@@ -173,7 +173,7 @@ Use a custom base image:
 BASE_IMAGE=my-node-runtime:tag docker compose build
 ```
 
-Custom `BASE_IMAGE` values must be Debian/Ubuntu-compatible because the Dockerfile uses `apt-get` in the app layer. If the base does not already provide `node` and `npm` on `PATH`, the layer installs Debian `nodejs`/`npm` packages; use a base that already has the Node version you require when Debian's packages are not sufficient.
+Custom `BASE_IMAGE` values must be Debian/Ubuntu-compatible because the Dockerfile uses `apt-get` in the app layer. If the base does not already provide `node >=20` and `npm` on `PATH`, the layer installs Node.js 20 from NodeSource.
 
 Compose defaults are portable:
 
@@ -186,14 +186,14 @@ Compose defaults are portable:
 - dashboard port: `${HOST_BIND_ADDR:-127.0.0.1}:${PORT:-3978}:3978`
 - Alola key: Docker secret `alola_ssh_key`, sourced from `${ALOLA_SSH_KEY_SOURCE:-./secrets/alola_ssh_key}` and mounted at `/run/secrets/alola_ssh_key`
 
-Compose uses `.env` for variable interpolation but does not pass the entire `.env` file into the container. Runtime channel identity remains `config/channels.json`; deprecated values like `TEAMS_CHAT_ID` are ignored.
+Compose uses `.env` for variable interpolation but does not pass the entire `.env` file into the container. Runtime channel identity remains `config/channels.json`.
 The base compose file does not mount a host Docker socket, does not bind-mount host `$HOME` by default, and publishes the dashboard on host loopback by default. Set `HOST_WORKSPACE_DIR`, `HOST_HOME_DIR`, or `HOST_BIND_ADDR=0.0.0.0` only when that exposure is intentional.
 
 ## Alola routing
 
 For Alola deployments, copy the relevant optional values from `config/env.alola.example` into `.env`.
 
-The app-level CLI is `bin/alola-session` and is also exposed as the package binary `alola-session`. `scripts/alola-session.js` remains as a compatibility launcher for old workspace wrappers, but external workspaces do not need to contain an Alola wrapper.
+The app-level CLI is `bin/alola-session` and is also exposed as the package binary `alola-session`.
 
 Examples:
 
@@ -241,7 +241,7 @@ Post a message with the configured prefix (default `!agent`) in a monitored Team
 !agent --alola gfx942 run rocminfo and verify the MI300 path
 ```
 
-Replies in the Teams thread continue the same harness session. The bot persists thread state under `APP_STATE_DIR/threads.json` and harness session files under `APP_STATE_DIR/sessions/<workspaceId>/<threadId>`. Legacy `sessions/<threadId>` directories are still discovered for migration.
+Replies in the Teams thread continue the same harness session. The bot persists thread state under `APP_STATE_DIR/threads.json` and harness session files under `APP_STATE_DIR/sessions/<workspaceId>/<threadId>`.
 
 Bot commands can be sent directly:
 
@@ -264,4 +264,4 @@ Run the full suite:
 npm test
 ```
 
-The suite covers flag parsing, harness arg ordering, workspace fallback, channel schema validation, per-channel model/concurrency defaults, secret resolution/redaction, bot-secret environment isolation, thread/poll workspace persistence, legacy session migration, Docker build context rules, Docker base-image customization, Teams thread collection, and Alola command construction.
+The suite covers flag parsing, harness arg ordering, workspace fallback, channel schema validation, per-channel model/concurrency defaults, secret resolution/redaction, bot-secret environment isolation, thread/poll workspace persistence, Docker build context rules, Docker base-image customization, Teams thread collection, and Alola command construction.

@@ -21,8 +21,9 @@ describe("Docker deployment config", () => {
     const dockerfile = readText("Dockerfile");
     assert.match(dockerfile, /^ARG BASE_IMAGE=node:20-bookworm-slim\nFROM \$\{BASE_IMAGE\}/);
     assert.ok(dockerfile.includes("Custom BASE_IMAGE values must be Debian/Ubuntu compatible"));
-    assert.ok(dockerfile.includes('if ! command -v node >/dev/null 2>&1; then node_packages="$node_packages nodejs"; fi'));
-    assert.ok(dockerfile.includes('if ! command -v npm >/dev/null 2>&1; then node_packages="$node_packages npm"; fi'));
+    assert.ok(dockerfile.includes('node_major="$(node -p'));
+    assert.ok(dockerfile.includes("https://deb.nodesource.com/node_20.x"));
+    assert.ok(dockerfile.includes("apt-get install -y --no-install-recommends nodejs"));
   });
 
   it("passes BASE_IMAGE through compose build args", () => {
