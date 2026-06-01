@@ -173,7 +173,7 @@ Use a custom base image:
 BASE_IMAGE=my-node-runtime:tag docker compose build
 ```
 
-The custom image must provide a Node/npm runtime compatible with this app. The current Dockerfile installs OS dependencies with Debian `apt`; custom images should be Debian-compatible unless you also carry those dependencies in the base image.
+Custom `BASE_IMAGE` values must be Debian/Ubuntu-compatible because the Dockerfile uses `apt-get` in the app layer. If the base does not already provide `node` and `npm` on `PATH`, the layer installs Debian `nodejs`/`npm` packages; use a base that already has the Node version you require when Debian's packages are not sufficient.
 
 Compose defaults are portable:
 
@@ -212,6 +212,9 @@ bin/alola-session stop --target gfx942
 HPE/Alola deployments usually override these values in `.env` or an override file:
 
 ```bash
+TEAMS_BOT_IMAGE=teams-bot:hipdnn-agent
+BASE_IMAGE=registry-sc-harbor.amd.com/miopen-images/hipdnn_env@sha256:d9e27314d00b2694af59dfbe1f3d4363928bd19009ad4b4dd97cf6380e8ee30a
+# The custom base must be Debian/Ubuntu-compatible for the app layer.
 APP_USER=sareeder
 APP_UID=1038
 APP_GID=1037

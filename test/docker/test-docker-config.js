@@ -17,13 +17,17 @@ function ignoredEntries() {
 }
 
 describe("Docker deployment config", () => {
-  it("uses a configurable base image before FROM", () => {
+  it("uses a configurable Debian-compatible base image and installs Node if absent", () => {
     const dockerfile = readText("Dockerfile");
     assert.match(dockerfile, /^ARG BASE_IMAGE=node:20-bookworm-slim\nFROM \$\{BASE_IMAGE\}/);
+    assert.ok(dockerfile.includes("Custom BASE_IMAGE values must be Debian/Ubuntu compatible"));
+    assert.ok(dockerfile.includes('if ! command -v node >/dev/null 2>&1; then node_packages="$node_packages nodejs"; fi'));
+    assert.ok(dockerfile.includes('if ! command -v npm >/dev/null 2>&1; then node_packages="$node_packages npm"; fi'));
   });
 
   it("passes BASE_IMAGE through compose build args", () => {
     const compose = readText("compose.yaml");
+    assert.equal(compose.includes("NODE_IMAGE:"), false);
     assert.ok(compose.includes("BASE_IMAGE: ${BASE_IMAGE:-node:20-bookworm-slim}"));
   });
 
@@ -85,6 +89,12 @@ describe("Docker deployment config", () => {
     assert.equal(compose.includes("/home/${APP_USER:-sareeder}/.local/bin/omp"), false);
     assert.ok(compose.includes("PI_STREAM_FIRST_EVENT_TIMEOUT_MS: ${PI_STREAM_FIRST_EVENT_TIMEOUT_MS:-600000}"));
     assert.ok(compose.includes("PI_STREAM_IDLE_TIMEOUT_MS: ${PI_STREAM_IDLE_TIMEOUT_MS:-600000}"));
+  });
+
+  it("runs with the configured uid/gid and home-local harness paths on PATH", () => {
+    const dockerfile = readText("Dockerfile");
+    assert.ok(dockerfile.includes("USER ${APP_UID}:${APP_GID}"));
+    assert.ok(dockerfile.includes("PATH=/home/${APP_USER}/.local/bin:/home/${APP_USER}/.bun/bin:${PATH}"));
   });
 
   it("passes supported non-channel runtime variables explicitly", () => {
