@@ -10,7 +10,8 @@ Microsoft Teams bot that dispatches an Oh My Pi/Claude-compatible harness from T
 │   └── alola-session              # app-level Alola CLI
 ├── config/
 │   ├── channels.example.json
-│   └── env.example
+│   ├── env.example
+│   └── env.alola.example
 ├── scripts/
 │   ├── alola-session.js           # compatibility launcher for old workspace wrappers
 │   ├── setup.js                   # setup/config validation
@@ -189,6 +190,8 @@ Compose uses `.env` for variable interpolation but does not pass the entire `.en
 The base compose file does not mount a host Docker socket, does not bind-mount host `$HOME` by default, and publishes the dashboard on host loopback by default. Set `HOST_WORKSPACE_DIR`, `HOST_HOME_DIR`, or `HOST_BIND_ADDR=0.0.0.0` only when that exposure is intentional.
 
 ## Alola routing
+
+For Alola deployments, copy the relevant optional values from `config/env.alola.example` into `.env`.
 
 The app-level CLI is `bin/alola-session` and is also exposed as the package binary `alola-session`. `scripts/alola-session.js` remains as a compatibility launcher for old workspace wrappers, but external workspaces do not need to contain an Alola wrapper.
 

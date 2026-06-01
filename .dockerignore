@@ -4,6 +4,7 @@ npm-debug.log
 .env
 .env.*
 !config/env.example
+!config/env.alola.example
 channels.json
 config/channels.json
 bot-message-ids.json
