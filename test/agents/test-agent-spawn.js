@@ -10,9 +10,13 @@ const {
   applyStickyOptions,
   normalizeBareModel,
   buildAgentResult,
-} = require("../lib/agent-spawn");
-const { HARNESS_CONFIG, MCP_CONFIG } = require("../lib/config");
-const { buildSessionMetadata, parseAlolaTarget } = require("../lib/alola-session");
+  promptNeedsAlola,
+  activeCountFor,
+  acquireAgentSlot,
+  releaseAgentSlot,
+} = require("../../src/agents/spawn");
+const { HARNESS_CONFIG, MCP_CONFIG, ALOLA_SESSION_BIN } = require("../../src/config/env");
+const { buildSessionMetadata, parseAlolaTarget } = require("../../src/alola/session");
 
 const projectDirs = getProjectDirs();
 
@@ -208,7 +212,11 @@ describe("buildHarnessArgs", () => {
     const promptIndex = promptFlag ? args.lastIndexOf(promptFlag) : args.length - 1;
     const prompt = args[promptIndex + (promptFlag ? 1 : 0)];
     assert.ok(prompt.includes("[Execution routing]"));
-    assert.ok(prompt.includes("workspace/scripts/alola-session run"));
+    assert.ok(prompt.includes(`${ALOLA_SESSION_BIN} run`));
+  });
+
+  it("routes smoke prompts through Alola", () => {
+    assert.equal(promptNeedsAlola("run hipDNN smoke"), true);
   });
 
   it("tells agents that Alola enroot rootfses are node-local", () => {
@@ -223,6 +231,34 @@ describe("buildHarnessArgs", () => {
     assert.ok(prompt.includes("login-node enroot rootfses"));
     assert.ok(prompt.includes("node-local under /var/tmp"));
     assert.ok(prompt.includes("recreate it from the shared image"));
+  });
+
+  it("treats workspace source roots as optional and not Alola-visible", () => {
+    const context = buildRoutingContext();
+    assert.ok(context.includes("Harness working directory"));
+    assert.ok(context.includes("Treat the workspace as opaque"));
+    assert.ok(context.includes("Use workspace-local instructions"));
+
+    const threadInfo = { sessionId: "session-build", isFollowUp: false, rootMessageId: "msg-build" };
+    const args = buildHarnessArgs(threadInfo, "run the Alola runtime smoke", []);
+    const promptIndex = promptFlag ? args.lastIndexOf(promptFlag) : args.length - 1;
+    const prompt = args[promptIndex + (promptFlag ? 1 : 0)];
+    assert.ok(prompt.includes("Do not assume workspace-local repos or worktrees are mounted inside Alola sessions"));
+  });
+
+  it("directs agents to checkout or create an Alola worktree for verification", () => {
+    const context = buildRoutingContext();
+    assert.ok(context.includes("do not skip because the default Alola checkout is dirty"));
+    assert.ok(context.includes("create an isolated Alola worktree"));
+    assert.ok(context.includes("never run a different checkout and claim it verifies the local patch"));
+
+    const threadInfo = { sessionId: "session-build", isFollowUp: false, rootMessageId: "msg-build" };
+    const args = buildHarnessArgs(threadInfo, "build and test hipDNN", []);
+    const promptIndex = promptFlag ? args.lastIndexOf(promptFlag) : args.length - 1;
+    const prompt = args[promptIndex + (promptFlag ? 1 : 0)];
+    assert.ok(prompt.includes("fetch/checkout the requested branch"));
+    assert.ok(prompt.includes("create an isolated Alola worktree"));
+    assert.ok(prompt.includes("verifying the wrong checkout"));
   });
 
   it("leaves ordinary prompts as local HPE work", () => {
@@ -361,6 +397,24 @@ describe("prepareHarnessArgs", () => {
       const addDirIndex = prepared.indexOf(HARNESS_CONFIG.flags.addDir);
       assert.notEqual(addDirIndex, -1);
       assert(addDirIndex < promptIndex);
+    }
+  });
+});
+
+describe("agent concurrency accounting", () => {
+  it("tracks active agents per chat instead of globally", () => {
+    const chatA = { chatId: "chat-a" };
+    const chatB = { chatId: "chat-b" };
+
+    try {
+      assert.equal(acquireAgentSlot(chatA, 1), true);
+      assert.equal(activeCountFor(chatA), 1);
+      assert.equal(acquireAgentSlot(chatA, 1), false, "same chat should respect its own cap");
+      assert.equal(acquireAgentSlot(chatB, 1), true, "other chat should not be blocked by chat A");
+      assert.equal(activeCountFor(chatB), 1);
+    } finally {
+      releaseAgentSlot(chatA);
+      releaseAgentSlot(chatB);
     }
   });
 });

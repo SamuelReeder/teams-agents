@@ -1,0 +1,22 @@
+[
+  {
+    "chatId": "19:single-chat-id@thread.skype",
+    "label": "My project chat",
+    "workspace": "/absolute/path/to/my-workspace"
+  },
+  {
+    "chatId": "19:docker-chat-id@thread.skype",
+    "label": "Docker-mounted workspace",
+    "workspace": "/app/workspace",
+    "defaultModel": "openai/gpt-5.5",
+    "alolaDefaultModel": "anthropic/claude-haiku-4-5",
+    "maxConcurrentAgents": 2
+  },
+  {
+    "chatId": "19:another-chat-id@thread.skype",
+    "label": "Home workspace example",
+    "workspace": "~/workspaces/another-workspace",
+    "defaultModel": "anthropic/claude-haiku-4-5",
+    "maxConcurrentAgents": 1
+  }
+]

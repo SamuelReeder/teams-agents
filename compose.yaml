@@ -1,54 +1,81 @@
 services:
   teams-bot:
-    # Build the image with the same UID/GID as the HPE account so mounted
-    # home-directory SSH keys keep their normal permissions.
     build:
       context: .
       args:
-        APP_USER: ${APP_USER:-sareeder}
-        APP_UID: ${APP_UID:-1038}
-        APP_GID: ${APP_GID:-1037}
-    image: teams-bot:hpe-alola-persistent-sessions
+        BASE_IMAGE: ${BASE_IMAGE:-node:20-bookworm-slim}
+        APP_USER: ${APP_USER:-teamsbot}
+        APP_UID: ${APP_UID:-1000}
+        APP_GID: ${APP_GID:-1000}
+    image: ${TEAMS_BOT_IMAGE:-teams-bot:latest}
     restart: unless-stopped
-    env_file:
-      - .env
     environment:
-      HOME: /home/${APP_USER:-sareeder}
-      PORT: "3978"
+      HOME: /home/${APP_USER:-teamsbot}
+      PORT: ${PORT:-3978}
+      APP_BIND_HOST: 0.0.0.0
+      POLL_INTERVAL: ${POLL_INTERVAL:-5000}
+      MAX_AGENTS: ${MAX_AGENTS:-3}
+      AGENT_TIMEOUT: ${AGENT_TIMEOUT:-3600000}
+      THREAD_TTL: ${THREAD_TTL:-604800000}
+      AGENT_PREFIX: ${AGENT_PREFIX:-!agent}
       APP_STATE_DIR: /app/state
       APP_LOG_DIR: /app/logs
       APP_SECRETS_DIR: /app/secrets
-      AGENT_RUNTIME_HOST: hpe-sjc2-43
-      DEPLOYMENT_HOST: hpe-sjc2-43
-      ALOLA_USER: sareeder
-      ALOLA_LOGIN_NODES: "03,04"
-      ALOLA_DEFAULT_LOGIN_NODE: "03"
-      ALOLA_DEFAULT_ASIC: gfx90a
-      ALOLA_DEFAULT_LOGIN_CONTAINER: sareeder-latest_container
-      ALOLA_IMAGE_TEMPLATE: /cluster/images/hipdnn/hipdnn_latest_{asic}.sqsh
-      ALOLA_DEFAULT_CONSTRAINT_PREFIX: MARKHAM
-      ALOLA_DEFAULT_GPU_TIMEOUT: "08:00:00"
-      ALOLA_SSH_KEY: /run/secrets/alola_ssh_key
-      ALOLA_SSH_OPTIONS: "-o BatchMode=yes -o StrictHostKeyChecking=yes"
-      # The HPE home mount provides the OMP harness installed for the account.
-      HARNESS_BIN: ${HARNESS_BIN:-/home/${APP_USER:-sareeder}/.local/bin/omp}
-      # OMP provider watchdogs; outer bot timeout remains controlled by AGENT_TIMEOUT.
+      APP_WORKSPACE_DIR: ${APP_WORKSPACE_DIR:-/app/workspace}
+      TEAMS_SCRIPTS_DIR: ${TEAMS_SCRIPTS_DIR:-/home/${APP_USER:-teamsbot}/.claude/skills/m365-teams/scripts}
+      TEAMS_REPLY_SCRIPT: /app/scripts/teams/reply.py
+      HARNESS_BIN: ${HARNESS_BIN:-omp}
+      HARNESS_BASE_ARGS: ${HARNESS_BASE_ARGS:---print}
+      HARNESS_APPEND_SYSTEM_PROMPT: ${HARNESS_APPEND_SYSTEM_PROMPT:-1}
+      HARNESS_SKIP_PERMISSIONS: ${HARNESS_SKIP_PERMISSIONS:-1}
+      HARNESS_DEFAULT_MODEL: ${HARNESS_DEFAULT_MODEL:-}
+      ALOLA_HARNESS_DEFAULT_MODEL: ${ALOLA_HARNESS_DEFAULT_MODEL:-}
+      ALOLA_USER: ${ALOLA_USER:-sareeder}
+      ALOLA_LOGIN_NODES: ${ALOLA_LOGIN_NODES:-03,04}
+      ALOLA_DEFAULT_LOGIN_NODE: ${ALOLA_DEFAULT_LOGIN_NODE:-03}
+      ALOLA_DEFAULT_ASIC: ${ALOLA_DEFAULT_ASIC:-gfx90a}
+      ALOLA_DEFAULT_LOGIN_CONTAINER: ${ALOLA_DEFAULT_LOGIN_CONTAINER:-sareeder-latest_container}
+      ALOLA_IMAGE_TEMPLATE: ${ALOLA_IMAGE_TEMPLATE:-/cluster/images/hipdnn/hipdnn_latest_{asic}.sqsh}
+      ALOLA_DEFAULT_CONSTRAINT_PREFIX: ${ALOLA_DEFAULT_CONSTRAINT_PREFIX:-MARKHAM}
+      ALOLA_DEFAULT_GPU_TIMEOUT: ${ALOLA_DEFAULT_GPU_TIMEOUT:-08:00:00}
+      ALOLA_SSH_KEY_FILE: /run/secrets/alola_ssh_key
+      ALOLA_SSH_OPTIONS: ${ALOLA_SSH_OPTIONS:--o BatchMode=yes -o StrictHostKeyChecking=yes}
+      ALOLA_GPU_PARTITION: ${ALOLA_GPU_PARTITION:-defq}
+      ALOLA_GPU_CPUS_PER_TASK: ${ALOLA_GPU_CPUS_PER_TASK:-16}
+      ALOLA_REMOTE_HOME_MOUNT: ${ALOLA_REMOTE_HOME_MOUNT:-/home/AMD/sareeder:/home/AMD/sareeder}
+      ALOLA_SSH_TIMEOUT_MS: ${ALOLA_SSH_TIMEOUT_MS:-30000}
+      ALOLA_START_TIMEOUT_MS: ${ALOLA_START_TIMEOUT_MS:-60000}
+      ALOLA_COMMAND_TIMEOUT_MS: ${ALOLA_COMMAND_TIMEOUT_MS:-1800000}
+      DEPLOYMENT_HOST: ${DEPLOYMENT_HOST:-}
+      AGENT_RUNTIME_HOST: ${AGENT_RUNTIME_HOST:-}
       PI_STREAM_FIRST_EVENT_TIMEOUT_MS: ${PI_STREAM_FIRST_EVENT_TIMEOUT_MS:-600000}
       PI_STREAM_IDLE_TIMEOUT_MS: ${PI_STREAM_IDLE_TIMEOUT_MS:-600000}
     ports:
-      - "3978:3978"
+      - "${HOST_BIND_ADDR:-127.0.0.1}:${PORT:-3978}:3978"
     volumes:
       - teams_state:/app/state
       - teams_logs:/app/logs
-      # Mount the HPE home directory so SSH/Git use the same keys, config, and
-      # known_hosts as the sareeder account on hpe-sjc2-43.
-      - /home/${APP_USER:-sareeder}:/home/${APP_USER:-sareeder}
-      - ./secrets/alola_ssh_key:/run/secrets/alola_ssh_key:ro
-      # The default HARNESS_BIN above uses the OMP install from the mounted HPE home.
+      - ./config/channels.json:/app/config/channels.json:ro
+      - ${HOST_WORKSPACE_DIR:-teams_workspace}:${APP_WORKSPACE_DIR:-/app/workspace}
+      - teams_workspace_repos:${APP_WORKSPACE_DIR:-/app/workspace}/repos
+      - teams_workspace_worktrees:${APP_WORKSPACE_DIR:-/app/workspace}/worktrees
+      - ${HOST_HOME_DIR:-teams_home}:/home/${APP_USER:-teamsbot}
+    secrets:
+      - source: alola_ssh_key
+        target: alola_ssh_key
+        mode: 0400
     security_opt:
       - no-new-privileges:true
     read_only: false
 
+secrets:
+  alola_ssh_key:
+    file: ${ALOLA_SSH_KEY_SOURCE:-./secrets/alola_ssh_key}
+
 volumes:
   teams_state:
   teams_logs:
+  teams_workspace:
+  teams_workspace_repos:
+  teams_workspace_worktrees:
+  teams_home:

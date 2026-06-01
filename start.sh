@@ -12,11 +12,8 @@ fi
 echo "=== Teams Agents Launcher ==="
 echo ""
 
-# Check workspace submodule
-if [ ! -f "$SCRIPT_DIR/workspace/CLAUDE.md" ]; then
-    echo "[!] Workspace submodule not initialized. Running git submodule update..."
-    cd "$SCRIPT_DIR" && git submodule update --init --recursive
-fi
+# Workspace is optional. If APP_WORKSPACE_DIR is unset, the app uses ./workspace
+# when present and falls back to $HOME when it is absent.
 
 resolve_harness_bin() {
     local candidate resolved
@@ -73,7 +70,7 @@ fi
 # Start server
 echo "[1/1] Starting server..."
 cd "$SCRIPT_DIR"
-node server.js &
+node src/index.js &
 SERVER_PID=$!
 sleep 2
 
@@ -86,7 +83,7 @@ echo ""
 echo "========================================"
 echo "  Server:    http://localhost:3978"
 echo "  Dashboard: http://localhost:3978/"
-echo "  Workspace: $SCRIPT_DIR/workspace"
+echo "  Workspace: ${APP_WORKSPACE_DIR:-auto}"
 echo "========================================"
 echo ""
 echo "Press Ctrl+C to stop"

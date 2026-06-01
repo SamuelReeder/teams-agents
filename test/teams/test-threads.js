@@ -1,9 +1,12 @@
 const { describe, it } = require("node:test");
 const assert = require("node:assert/strict");
-const { isBotMessage, agentResponseIds } = require("../lib/teams-io");
-const { classifyCommand, isAgentInvocation, commandTextForMessage, agentTextForMessage, collectThreadMessages, buildHelpMessage, listCronTasks, listWorkspaceCommands, listWorkspaceSkills } = require("../lib/threads");
-const { AGENT_PREFIX, loadChannels } = require("../lib/config");
-const { getPolls } = require("../lib/polls");
+const fs = require("fs");
+const os = require("os");
+const path = require("path");
+const { isBotMessage, agentResponseIds } = require("../../src/teams/io");
+const { classifyCommand, isAgentInvocation, commandTextForMessage, agentTextForMessage, collectThreadMessages, buildHelpMessage, listCronTasks, listWorkspaceCommands, listWorkspaceSkills } = require("../../src/teams/threads");
+const { AGENT_PREFIX, validateChannels } = require("../../src/config/env");
+const { getPolls } = require("../../src/polls/polls");
 
 function msg(content, from = "Reeder, Samuel") {
   return { id: "test-" + Math.random(), from, content, messagetype: "RichText/Html" };
@@ -142,9 +145,9 @@ describe("Teams command routing", () => {
     assert.equal(agentTextForMessage(prefixedChannel, "!agents hello"), null);
   });
 
-  it("uses the global agent prefix for every configured channel", () => {
-    const channels = loadChannels();
-    assert.ok(channels.length > 0, "test expects configured Teams channels");
+  it("applies the global agent prefix to parsed channel entries", () => {
+    const channels = validateChannels([{ chatId: "chat-a" }, { chatId: "chat-b", label: "B" }], "channels");
+
     for (const channel of channels) {
       assert.equal(channel.prefix, AGENT_PREFIX);
     }
@@ -267,24 +270,30 @@ describe("Prefixed thread reply collection", () => {
 });
 
 describe("Teams help content", () => {
-  it("lists current workspace commands and skills", () => {
-    const commandNames = listWorkspaceCommands().map((entry) => entry.name);
-    const skillNames = listWorkspaceSkills().map((entry) => entry.name);
-    const help = buildHelpMessage({ chatId: "19:test@thread.skype", prefix: "!agent" });
+  it("lists optional commands and skills from the selected workspace", () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "teams-help-workspace-"));
+    try {
+      fs.mkdirSync(path.join(workspace, ".claude/commands"), { recursive: true });
+      fs.mkdirSync(path.join(workspace, ".shared/skills/pr-summary"), { recursive: true });
+      fs.writeFileSync(path.join(workspace, ".claude/commands/worktrees.md"), "---\ndescription: Manage worktrees\n---\n");
+      fs.writeFileSync(path.join(workspace, ".shared/skills/pr-summary/SKILL.md"), "---\nname: pr-summary\ndescription: Summarize PRs\n---\n");
 
-    assert.deepEqual(commandNames, ["orchestrate", "review-pr", "squash-prep", "worktrees"]);
-    assert.ok(skillNames.includes("pr-summary"), "pr-summary skill is retained");
-    assert.ok(skillNames.includes("hipdnn-superbuild-test"), "skills are listed from manifests");
+      const channel = { chatId: "19:test@thread.skype", prefix: "!agent", workspace };
+      const commandNames = listWorkspaceCommands(channel).map((entry) => entry.name);
+      const skillNames = listWorkspaceSkills(channel).map((entry) => entry.name);
+      const help = buildHelpMessage(channel);
 
-    for (const removed of ["/descriptor", "/goto", "/prep-pr", "/create-pr", "/wip", "/task", "/status"]) {
-      assert.equal(help.includes(`<code>${removed}`), false, `${removed} must not be in help`);
+      assert.deepEqual(commandNames, ["worktrees"]);
+      assert.deepEqual(skillNames, ["pr-summary"]);
+
+      assert.ok(help.includes("Bot commands below can be sent directly"), "help advertises direct bot commands");
+      assert.equal(help.includes("bot commands with <code>!agent</code>"), false, "help must not require prefix for bot commands");
+      assert.ok(help.includes("<b>Skills</b>"), "help has a skills section");
+      assert.ok(help.includes("<code>pr-summary</code>"), "help includes pr-summary skill");
+      assert.ok(help.includes("<code>/worktrees</code>"), "help includes retained commands");
+    } finally {
+      fs.rmSync(workspace, { recursive: true, force: true });
     }
-
-    assert.ok(help.includes("Bot commands below can be sent directly"), "help advertises direct bot commands");
-    assert.equal(help.includes("bot commands with <code>!agent</code>"), false, "help must not require prefix for bot commands");
-    assert.ok(help.includes("<b>Skills</b>"), "help has a skills section");
-    assert.ok(help.includes("<code>pr-summary</code>"), "help includes pr-summary skill");
-    assert.ok(help.includes("<code>/worktrees</code>"), "help includes retained commands");
   });
 });
 

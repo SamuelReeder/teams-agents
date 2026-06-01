@@ -2,7 +2,7 @@ const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
 const { spawnSync } = require("child_process");
-const { ALOLA_CONFIG } = require("./config");
+const { ALOLA_CONFIG } = require("../config/env");
 
 const COMMAND_ID_RE = /^[A-Za-z0-9_-]+$/;
 const ASIC_RE = /^gfx[0-9][0-9a-z]*$/i;

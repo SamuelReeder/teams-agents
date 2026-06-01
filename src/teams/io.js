@@ -1,8 +1,8 @@
-const { execSync } = require("child_process");
+const { execFileSync } = require("child_process");
 const fs = require("fs");
 const path = require("path");
 const { marked } = require("marked");
-const { SCRIPTS_DIR, REPLY_SCRIPT, ROOT_DIR, STATE_DIR } = require("./config");
+const { SCRIPTS_DIR, REPLY_SCRIPT, ROOT_DIR, STATE_DIR } = require("../config/env");
 
 marked.setOptions({ breaks: true, gfm: true });
 const AI_PREFIX = "[AI]";
@@ -30,13 +30,11 @@ function loadBotIds() {
 
 function sendToTeams(chatId, message, replyToId, isAgentResponse = false) {
   try {
-    let cmd;
-    if (replyToId) {
-      cmd = `python3 ${REPLY_SCRIPT} --chat-id "${chatId}" --reply-to "${replyToId}" -m - --html --json`;
-    } else {
-      cmd = `python3 ${SCRIPTS_DIR}/send_chat.py --chat-id "${chatId}" -m - --html --json`;
-    }
-    const result = execSync(cmd, {
+    const script = replyToId ? REPLY_SCRIPT : path.join(SCRIPTS_DIR, "send_chat.py");
+    const args = replyToId
+      ? [script, "--chat-id", chatId, "--reply-to", replyToId, "-m", "-", "--html", "--json"]
+      : [script, "--chat-id", chatId, "-m", "-", "--html", "--json"];
+    const result = execFileSync("python3", args, {
       timeout: 30000,
       input: message,
       stdio: ["pipe", "pipe", "pipe"],
@@ -48,10 +46,12 @@ function sendToTeams(chatId, message, replyToId, isAgentResponse = false) {
         if (isAgentResponse) agentResponseIds.add(parsed.message_id);
         saveBotIds();
       }
+      return parsed;
     } catch {}
   } catch (err) {
     console.error("Failed to send to Teams:", err.message);
   }
+  return null;
 }
 
 function markdownToHtml(md) {
@@ -122,8 +122,9 @@ function isAgentResponse(msg) {
 
 function fetchMessages(chatId, limit = 10) {
   try {
-    const result = execSync(
-      `python3 ${SCRIPTS_DIR}/list_messages.py --chat-id "${chatId}" --limit ${limit} --json`,
+    const result = execFileSync(
+      "python3",
+      [path.join(SCRIPTS_DIR, "list_messages.py"), "--chat-id", chatId, "--limit", String(limit), "--json"],
       { timeout: 30000, stdio: ["ignore", "pipe", "pipe"] }
     );
     return JSON.parse(result.toString()) || [];
