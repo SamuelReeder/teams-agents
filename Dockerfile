@@ -15,6 +15,7 @@ RUN set -eux; \
       openssh-client \
       python3 \
       python3-venv \
+      sudo \
       tmux \
       tini; \
     node_major="$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)"; \
@@ -49,7 +50,16 @@ RUN set -eux; \
       useradd --uid "${APP_UID}" --gid "${APP_GID}" --create-home --home-dir "/home/${APP_USER}" --shell /bin/bash "${APP_USER}"; \
     fi; \
     mkdir -p "/home/${APP_USER}"; \
-    chown "${APP_UID}:${APP_GID}" "/home/${APP_USER}"
+    chown "${APP_UID}:${APP_GID}" "/home/${APP_USER}"; \
+    app_user_name="$(getent passwd "${APP_UID}" | cut -d: -f1)"; \
+    printf '%s ALL=(ALL) NOPASSWD:ALL\n' "$app_user_name" > /etc/sudoers.d/teams-bot; \
+    chmod 0440 /etc/sudoers.d/teams-bot; \
+    rocm_path="$(readlink -f /opt/rocm 2>/dev/null || true)"; \
+    if [ -n "$rocm_path" ] && [ -e "$rocm_path" ]; then \
+      chown -R "${APP_UID}:${APP_GID}" "$rocm_path"; \
+      chmod -R u+rwX "$rocm_path"; \
+    fi; \
+    if [ -L /opt/rocm ]; then chown -h "${APP_UID}:${APP_GID}" /opt/rocm; fi
 
 WORKDIR /app
 
