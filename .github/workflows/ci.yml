@@ -36,7 +36,7 @@ jobs:
       - run: npm test
       - run: npm run setup:check
         env:
-          HARNESS_BIN: /usr/bin/node
+          HARNESS_BIN: node
           TEAMS_SCRIPTS_DIR: /tmp/teams-scripts
           TEAMS_REPLY_SCRIPT: scripts/teams/reply.py
       - run: docker compose config

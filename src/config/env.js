@@ -138,6 +138,11 @@ function resolveHarnessBin() {
     if (resolved) return resolved;
   }
 
+  for (const candidate of [process.env.HARNESS_BIN, process.env.OH_MY_PI_BIN]) {
+    const resolved = resolveExecutable(candidate);
+    if (resolved) return resolved;
+  }
+
   for (const candidate of ["oh-my-pi", "omp", "claude"]) {
     const resolved = resolveExecutable(candidate);
     if (resolved) return resolved;
