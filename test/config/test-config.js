@@ -64,20 +64,10 @@ describe("workspace resolution", () => {
     assert.equal(resolved.source, "env");
   });
 
-  it("uses bundled repo workspace when present and no explicit workspace is configured", () => {
+  it("falls back to HOME when no channel or default workspace is configured", () => {
     const root = tempDir();
     const home = mkdirp(path.join(root, "home"));
-    const bundled = mkdirp(path.join(root, "workspace"));
-
-    const resolved = resolveWorkspace(null, { rootDir: root, home, env: { HOME: home } });
-
-    assert.equal(resolved.dir, bundled);
-    assert.equal(resolved.source, "repo");
-  });
-
-  it("falls back to HOME when the bundled workspace is absent", () => {
-    const root = tempDir();
-    const home = mkdirp(path.join(root, "home"));
+    mkdirp(path.join(root, "workspace"));
 
     const resolved = resolveWorkspace(null, { rootDir: root, home, env: { HOME: home } });
 

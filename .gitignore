@@ -11,4 +11,5 @@ threads.json
 /state/
 /logs/
 /secrets/
+/workspace/
 *.log

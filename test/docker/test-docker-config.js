@@ -49,9 +49,10 @@ describe("Docker deployment config", () => {
     assert.equal(compose.includes("TEAMS_CHAT_ID"), false);
   });
 
-  it("excludes workspace-local clones from the Docker build context", () => {
+  it("excludes workspaces and workspace-local clones from the Docker build context", () => {
     const entries = ignoredEntries();
 
+    assert.equal(entries.includes("workspace"), true);
     assert.equal(entries.includes("workspace/repos"), true);
     assert.equal(entries.includes("workspace/worktrees"), true);
   });

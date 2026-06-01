@@ -26,7 +26,6 @@ Microsoft Teams bot that dispatches an Oh My Pi/Claude-compatible harness from T
 │   └── state/                     # state store compatibility exports
 ├── test/
 │   ├── agents/ config/ teams/ polls/ alola/ docker/ state/
-├── workspace/                     # optional bundled/default workspace
 ├── Dockerfile
 └── compose.yaml
 ```
@@ -50,6 +49,7 @@ cp config/channels.example.json config/channels.json
 
 At minimum:
 - set one `chatId` entry in `config/channels.json`
+- set that entry's `workspace` to your actual workspace directory
 - set `HARNESS_BIN` in `.env`, or leave it unset if `omp` is on `PATH`
 
 3. Authenticate the Microsoft Teams helper scripts used by your `TEAMS_SCRIPTS_DIR` installation:
@@ -59,14 +59,30 @@ python3 ~/.claude/skills/m365-teams/scripts/auth.py
 python3 ~/.claude/skills/m365-teams/scripts/auth.py --complete <device_code>
 ```
 
-4. Choose a workspace, or omit it:
+4. Add your actual workspace directory:
 
-```bash
-# Optional. If omitted, the bot uses ./workspace when present, otherwise $HOME.
-APP_WORKSPACE_DIR=/absolute/path/to/workspace
+```json
+[
+  {
+    "chatId": "19:your-chat-id@thread.skype",
+    "label": "My project chat",
+    "workspace": "/absolute/path/to/my-workspace"
+  }
+]
 ```
 
-A workspace is treated as an opaque harness working directory. The bot does not require `.claude/`, `.shared/`, `repos/`, `worktrees/`, or registry files to exist. If those conventional files exist, help/dashboard output may surface them; otherwise the harness simply starts with `cwd` set to the selected workspace.
+For local non-Docker runs, use an absolute host path or `~/...`. For Docker, mount the host directory and use the container path:
+
+```bash
+HOST_WORKSPACE_DIR=/host/path/to/my-workspace
+APP_WORKSPACE_DIR=/app/workspace
+```
+
+```json
+"workspace": "/app/workspace"
+```
+
+A workspace is treated as an opaque harness working directory. The bot does not require `.claude/`, `.shared/`, `repos/`, `worktrees`, or registry files to exist. If those conventional files exist, help/dashboard output may surface them; otherwise the harness simply starts with `cwd` set to the selected workspace.
 
 5. Validate configuration:
 
@@ -114,10 +130,9 @@ Workspace resolution order is:
 
 1. `channel.workspace`
 2. `APP_WORKSPACE_DIR`
-3. `<repo>/workspace`, when it exists
-4. `$HOME`
+3. `$HOME`
 
-Explicitly configured workspace paths must exist and be readable. The implicit bundled `workspace/` fallback is optional; when absent, `$HOME` is used.
+Explicitly configured workspace paths must exist and be readable.
 
 ## Secrets
 
@@ -161,7 +176,7 @@ Compose defaults are portable:
 - state: `teams_state:/app/state`
 - logs: `teams_logs:/app/logs`
 - channel config: `./config/channels.json:/app/config/channels.json:ro`
-- workspace: `${HOST_WORKSPACE_DIR:-./workspace}:${APP_WORKSPACE_DIR:-/app/workspace}`
+- workspace: `${HOST_WORKSPACE_DIR:-$HOME}:${APP_WORKSPACE_DIR:-/app/workspace}`
 - optional durable workspace source roots: `teams_workspace_repos` and `teams_workspace_worktrees`
 - home: `${HOST_HOME_DIR:-$HOME}:/home/${APP_USER:-teamsbot}`
 - Alola key: Docker secret `alola_ssh_key`, sourced from `${ALOLA_SSH_KEY_SOURCE:-./secrets/alola_ssh_key}` and mounted at `/run/secrets/alola_ssh_key`
@@ -171,7 +186,7 @@ The base compose file does not mount a host Docker socket or run privileged.
 
 ## Alola routing
 
-The app-level CLI is `bin/alola-session` and is also exposed as the package binary `alola-session`. The bundled `workspace/scripts/alola-session` wrapper remains for compatibility, but external workspaces do not need to contain it.
+The app-level CLI is `bin/alola-session` and is also exposed as the package binary `alola-session`. `scripts/alola-session.js` remains as a compatibility launcher for old workspace wrappers, but external workspaces do not need to contain an Alola wrapper.
 
 Examples:
 

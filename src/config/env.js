@@ -158,8 +158,6 @@ for (const dir of [STATE_DIR, LOG_DIR]) {
   if (dir) fs.mkdirSync(dir, { recursive: true });
 }
 
-const DEFAULT_WORKSPACE_DIR = path.join(ROOT_DIR, "workspace");
-const WORKSPACE_DIR = DEFAULT_WORKSPACE_DIR;
 const SCRIPTS_DIR = envPath("TEAMS_SCRIPTS_DIR", path.join(HOME, ".claude/skills/m365-teams/scripts"));
 const REPLY_SCRIPT = envPath("TEAMS_REPLY_SCRIPT", path.join(ROOT_DIR, "scripts/teams/reply.py"));
 const HARNESS_BIN = resolveHarnessBin();
@@ -338,8 +336,6 @@ function resolveWorkspace(channel = null, options = {}) {
     return workspaceObject(dir, "env");
   }
 
-  const bundled = path.join(rootDir, "workspace");
-  if (isAccessibleDirectory(bundled)) return workspaceObject(bundled, "repo");
 
   const fallbackHome = path.resolve(home || os.homedir());
   assertWorkspaceDirectory(fallbackHome, "home", label);
@@ -543,8 +539,6 @@ module.exports = {
   STATE_DIR,
   LOG_DIR,
   SECRETS_DIR,
-  WORKSPACE_DIR,
-  DEFAULT_WORKSPACE_DIR,
   SCRIPTS_DIR,
   REPLY_SCRIPT,
   HARNESS_BIN,

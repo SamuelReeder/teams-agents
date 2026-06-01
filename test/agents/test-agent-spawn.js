@@ -234,7 +234,7 @@ describe("buildHarnessArgs", () => {
     const context = buildRoutingContext();
     assert.ok(context.includes("Harness working directory"));
     assert.ok(context.includes("Treat the workspace as opaque"));
-    assert.ok(context.includes("Do not assume these paths are mounted inside Alola sessions") || context.includes("workspace-local repos or worktrees are mounted inside Alola sessions"));
+    assert.ok(context.includes("Use workspace-local instructions"));
 
     const threadInfo = { sessionId: "session-build", isFollowUp: false, rootMessageId: "msg-build" };
     const args = buildHarnessArgs(threadInfo, "run the Alola runtime smoke", []);

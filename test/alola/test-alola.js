@@ -191,15 +191,6 @@ describe("Alola command construction", () => {
   });
 });
 
-describe("Alola environment detection", () => {
-  it("reports enroot containers as node-local rootfses", () => {
-    const script = fs.readFileSync(path.join(ROOT_DIR, "workspace/scripts/ssh/detect-env.sh"), "utf8");
-    assert.ok(script.includes("ENROOT_DEFAULT_LOGIN_CONTAINER"));
-    assert.ok(script.includes("ENROOT_CONTAINER_SCOPE=node-local_rootfs"));
-    assert.ok(script.includes("ENROOT_SHARED_IMAGE_DIR=/cluster/images/hipdnn"));
-    assert.ok(script.includes("ENROOT_CONTAINERS=${CONTAINERS:-none}"));
-  });
-});
 
 describe("Deployment artifacts", () => {
   it("do not contain WSL-specific absolute paths", () => {
