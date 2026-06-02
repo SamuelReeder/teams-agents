@@ -73,15 +73,17 @@ describe("Docker deployment config", () => {
     assert.ok(dockerfile.includes("/app/workspace/repos /app/workspace/worktrees"));
   });
 
-  it("uses Docker secrets for the Alola SSH key", () => {
+  it("keeps the Alola SSH key mount opt-in", () => {
     const compose = readText("compose.yaml");
+    const alolaCompose = readText("compose.alola.yaml");
     const dockerfile = readText("Dockerfile");
 
-    assert.ok(compose.includes("secrets:"));
-    assert.ok(compose.includes("source: alola_ssh_key"));
-    assert.ok(compose.includes("file: ${ALOLA_SSH_KEY_SOURCE:-./secrets/alola_ssh_key}"));
-    assert.ok(compose.includes("ALOLA_SSH_KEY_FILE: /run/secrets/alola_ssh_key"));
-    assert.ok(dockerfile.includes("ALOLA_SSH_KEY_FILE=/run/secrets/alola_ssh_key"));
+    assert.equal(compose.includes("ALOLA_SSH_KEY_FILE"), false);
+    assert.equal(compose.includes("source: alola_ssh_key"), false);
+    assert.equal(dockerfile.includes("ALOLA_SSH_KEY_FILE=/run/secrets/alola_ssh_key"), false);
+    assert.ok(alolaCompose.includes("ALOLA_SSH_KEY_FILE: /run/secrets/alola_ssh_key"));
+    assert.ok(alolaCompose.includes("source: alola_ssh_key"));
+    assert.ok(alolaCompose.includes("file: ${ALOLA_SSH_KEY_SOURCE:?Set ALOLA_SSH_KEY_SOURCE"));
   });
 
   it("defaults to a portable harness command instead of an HPE home path", () => {
@@ -115,13 +117,13 @@ describe("Docker deployment config", () => {
     ]) {
       assert.ok(compose.includes(key), `${key} missing from compose environment`);
     }
-    assert.ok(compose.includes("${HOST_HOME_DIR:-teams_home}:/home/${APP_USER:-teamsbot}"));
+    assert.ok(compose.includes("${HOST_HOME_DIR:-${HOME:-teams_home}}:/home/${APP_USER:-teamsbot}"));
   });
 
-  it("uses safe Docker defaults for host filesystem and dashboard exposure", () => {
+  it("uses explicit Docker defaults for mounts and dashboard exposure", () => {
     const compose = readText("compose.yaml");
     assert.ok(compose.includes("${HOST_WORKSPACE_DIR:-teams_workspace}:${APP_WORKSPACE_DIR:-/app/workspace}"));
-    assert.ok(compose.includes("${HOST_HOME_DIR:-teams_home}:/home/${APP_USER:-teamsbot}"));
+    assert.ok(compose.includes("${HOST_HOME_DIR:-${HOME:-teams_home}}:/home/${APP_USER:-teamsbot}"));
     assert.ok(compose.includes("${HOST_BIND_ADDR:-127.0.0.1}:${PORT:-3978}:3978"));
   });
 });

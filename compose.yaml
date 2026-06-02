@@ -38,7 +38,6 @@ services:
       ALOLA_IMAGE_TEMPLATE: ${ALOLA_IMAGE_TEMPLATE:-/cluster/images/hipdnn/hipdnn_latest_{asic}.sqsh}
       ALOLA_DEFAULT_CONSTRAINT_PREFIX: ${ALOLA_DEFAULT_CONSTRAINT_PREFIX:-MARKHAM}
       ALOLA_DEFAULT_GPU_TIMEOUT: ${ALOLA_DEFAULT_GPU_TIMEOUT:-08:00:00}
-      ALOLA_SSH_KEY_FILE: /run/secrets/alola_ssh_key
       ALOLA_SSH_OPTIONS: ${ALOLA_SSH_OPTIONS:--o BatchMode=yes -o StrictHostKeyChecking=yes}
       ALOLA_GPU_PARTITION: ${ALOLA_GPU_PARTITION:-defq}
       ALOLA_GPU_CPUS_PER_TASK: ${ALOLA_GPU_CPUS_PER_TASK:-16}
@@ -59,18 +58,10 @@ services:
       - ${HOST_WORKSPACE_DIR:-teams_workspace}:${APP_WORKSPACE_DIR:-/app/workspace}
       - teams_workspace_repos:${APP_WORKSPACE_DIR:-/app/workspace}/repos
       - teams_workspace_worktrees:${APP_WORKSPACE_DIR:-/app/workspace}/worktrees
-      - ${HOST_HOME_DIR:-teams_home}:/home/${APP_USER:-teamsbot}
-    secrets:
-      - source: alola_ssh_key
-        target: alola_ssh_key
-        mode: 0400
+      - ${HOST_HOME_DIR:-${HOME:-teams_home}}:/home/${APP_USER:-teamsbot}
     security_opt:
       - no-new-privileges:true
     read_only: false
-
-secrets:
-  alola_ssh_key:
-    file: ${ALOLA_SSH_KEY_SOURCE:-./secrets/alola_ssh_key}
 
 volumes:
   teams_state:

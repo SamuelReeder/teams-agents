@@ -73,7 +73,6 @@ ENV NODE_ENV=production \
     APP_LOG_DIR=/app/logs \
     APP_SECRETS_DIR=/app/secrets \
     APP_WORKSPACE_DIR=/app/workspace \
-    ALOLA_SSH_KEY_FILE=/run/secrets/alola_ssh_key \
     ALOLA_SSH_OPTIONS="-o BatchMode=yes -o StrictHostKeyChecking=yes" \
     HARNESS_APPEND_SYSTEM_PROMPT=1 \
     HARNESS_SKIP_PERMISSIONS=1

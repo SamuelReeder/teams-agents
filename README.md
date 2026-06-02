@@ -28,14 +28,18 @@ Microsoft Teams bot that dispatches an Oh My Pi/Claude-compatible harness from T
 ├── test/
 │   ├── agents/ config/ teams/ polls/ alola/ docker/ state/
 ├── Dockerfile
-└── compose.yaml
+├── compose.yaml
+└── compose.alola.yaml
 ```
 
-Prerequisite: this app shells out to Microsoft Teams helper scripts from the `m365-teams` Claude skill (`auth.py`, `list_messages.py`, `send_chat.py`). Make those scripts and their auth state readable wherever the bot runs: mount a prepared home/scripts directory into the container for Docker Compose, or install/authenticate them on the host for local npm runs. Set `TEAMS_SCRIPTS_DIR`/`TEAMS_REPLY_SCRIPT` if you use equivalent scripts elsewhere.
+Prerequisite: this app shells out to Microsoft Teams helper scripts from the `m365-teams` Claude skill (`auth.py`, `list_messages.py`, `send_chat.py`). Install/authenticate that skill on the host. Docker Compose mounts the host home directory by default so the container can read the same skill scripts and auth state unless `HOST_HOME_DIR` is overridden.
 
 ## Quick start: Docker Compose
 
 Use Docker Compose as the default path. It makes the runtime boundary explicit: the bot, state, logs, secrets, and mounted workspace are the same shape as a deployed instance.
+
+> [!CAUTION]
+> Docker Compose mounts your host home directory into the container by default: `${HOST_HOME_DIR:-${HOME:-teams_home}}:/home/${APP_USER:-teamsbot}`. This makes Teams auth, `~/.claude` skill scripts, and home-installed harness binaries available in the container, but the bot and spawned harness can read any mounted home files that the container user can read. Set `HOST_HOME_DIR` to a dedicated service-account home, or to `teams_home` for a named Docker volume, if you want a smaller mount.
 
 1. Copy the templates:
 
@@ -52,9 +56,19 @@ APP_WORKSPACE_DIR=/app/workspace
 HARNESS_BIN=omp
 ```
 
-Set `HARNESS_BIN` to the harness command or absolute path visible inside the container. If the container should use Teams auth files, helper scripts, or harness binaries from your host home directory, also set `HOST_HOME_DIR=/home/you`.
+Set `HARNESS_BIN` to the harness command or absolute path visible inside the container. If your host home files are not readable by uid/gid `1000:1000`, set `APP_UID` and `APP_GID` in `.env` to your host uid/gid before building the image.
 
-3. Fill out `config/channels.json`. For one Docker-mounted workspace, the file can be:
+3. Authenticate Teams and find the chat ID to monitor:
+
+```bash
+python3 ~/.claude/skills/m365-teams/scripts/auth.py
+python3 ~/.claude/skills/m365-teams/scripts/auth.py --complete <device_code>
+python3 ~/.claude/skills/m365-teams/scripts/list_chats.py --limit 20 --json
+```
+
+Copy the `id` for the Teams chat you want the bot to monitor. That value is the `chatId` in `config/channels.json`.
+
+4. Fill out `config/channels.json`. For one Docker-mounted workspace, the file can be:
 
 ```json
 [
@@ -68,12 +82,7 @@ Set `HARNESS_BIN` to the harness command or absolute path visible inside the con
 
 `workspace` is the path seen by the bot. With the Compose settings above, `HOST_WORKSPACE_DIR` is mounted at `APP_WORKSPACE_DIR`, so channel entries should use the container path (`/app/workspace`), not the host path.
 
-4. Authenticate the Microsoft Teams helper scripts used by your `TEAMS_SCRIPTS_DIR` installation:
-
-```bash
-python3 ~/.claude/skills/m365-teams/scripts/auth.py
-python3 ~/.claude/skills/m365-teams/scripts/auth.py --complete <device_code>
-```
+A workspace is treated as an opaque harness working directory. The bot does not require `.claude/`, `.shared/`, `repos`, `worktrees`, or registry files to exist. If those conventional files exist, help/dashboard output may surface them; otherwise the harness simply starts with `cwd` set to the selected workspace.
 
 5. Validate the container configuration:
 
@@ -81,6 +90,8 @@ python3 ~/.claude/skills/m365-teams/scripts/auth.py --complete <device_code>
 docker compose build
 docker compose run --rm teams-bot npm run setup:check
 ```
+
+A warning about `ALOLA_SSH_KEY` is expected unless you are using Alola routing.
 
 6. Start the bot:
 
@@ -91,7 +102,13 @@ docker compose logs -f teams-bot
 
 Dashboard: `http://localhost:3978/`.
 
-A workspace is treated as an opaque harness working directory. The bot does not require `.claude/`, `.shared/`, `repos/`, `worktrees`, or registry files to exist. If those conventional files exist, help/dashboard output may surface them; otherwise the harness simply starts with `cwd` set to the selected workspace.
+7. Send a smoke-test message in the monitored Teams chat:
+
+```text
+!agent say hello and print the current working directory
+```
+
+The bot should reply in the same Teams thread.
 
 ## Local npm run
 
@@ -105,7 +122,17 @@ cp config/env.example .env
 cp config/channels.example.json config/channels.json
 ```
 
-2. Fill out `config/channels.json` with a host path:
+2. Authenticate Teams and find the chat ID to monitor:
+
+```bash
+python3 ~/.claude/skills/m365-teams/scripts/auth.py
+python3 ~/.claude/skills/m365-teams/scripts/auth.py --complete <device_code>
+python3 ~/.claude/skills/m365-teams/scripts/list_chats.py --limit 20 --json
+```
+
+Copy the `id` for the Teams chat you want the bot to monitor. That value is the `chatId` in `config/channels.json`.
+
+3. Fill out `config/channels.json` with a host path:
 
 ```json
 [
@@ -117,13 +144,11 @@ cp config/channels.example.json config/channels.json
 ]
 ```
 
-3. Set `HARNESS_BIN` in `.env`, or leave it unset if `omp` is on `PATH`.
+4. Set `HARNESS_BIN` in `.env`, or leave it unset if `omp` is on `PATH`.
 
-4. Authenticate Teams, validate configuration, and start:
+5. Validate configuration and start:
 
 ```bash
-python3 ~/.claude/skills/m365-teams/scripts/auth.py
-python3 ~/.claude/skills/m365-teams/scripts/auth.py --complete <device_code>
 npm run setup:check
 npm start
 ```
@@ -211,16 +236,20 @@ Compose defaults are portable:
 - channel config: `./config/channels.json:/app/config/channels.json:ro`
 - workspace: `${HOST_WORKSPACE_DIR:-teams_workspace}:${APP_WORKSPACE_DIR:-/app/workspace}`
 - optional durable workspace source roots: `teams_workspace_repos` and `teams_workspace_worktrees`
-- home: `${HOST_HOME_DIR:-teams_home}:/home/${APP_USER:-teamsbot}`
+- home: `${HOST_HOME_DIR:-${HOME:-teams_home}}:/home/${APP_USER:-teamsbot}`
 - dashboard port: `${HOST_BIND_ADDR:-127.0.0.1}:${PORT:-3978}:3978`
-- Alola key: Docker secret `alola_ssh_key`, sourced from `${ALOLA_SSH_KEY_SOURCE:-./secrets/alola_ssh_key}` and mounted at `/run/secrets/alola_ssh_key`
 
 Compose uses `.env` for variable interpolation but does not pass the entire `.env` file into the container. Runtime channel identity remains `config/channels.json`.
-The base compose file does not mount a host Docker socket, does not bind-mount host `$HOME` by default, and publishes the dashboard on host loopback by default. Set `HOST_WORKSPACE_DIR`, `HOST_HOME_DIR`, or `HOST_BIND_ADDR=0.0.0.0` only when that exposure is intentional.
+The base compose file does not mount a host Docker socket and publishes the dashboard on host loopback by default. It does mount host `$HOME` by default for Teams auth and home-installed harness access; set `HOST_HOME_DIR=teams_home` to use a named Docker volume instead, or set `HOST_HOME_DIR` to a dedicated service-account home.
 
 ## Alola routing
 
-For Alola deployments, copy the relevant optional values from `config/env.alola.example` into `.env`.
+For Alola deployments, copy the relevant optional values from `config/env.alola.example` into `.env`. Docker Compose Alola deployments must also set `ALOLA_SSH_KEY_SOURCE` and include the Alola override file:
+
+```bash
+docker compose -f compose.yaml -f compose.alola.yaml run --rm teams-bot npm run setup:check
+docker compose -f compose.yaml -f compose.alola.yaml up -d --build
+```
 
 The app-level CLI is `bin/alola-session` and is also exposed as the package binary `alola-session`.
 

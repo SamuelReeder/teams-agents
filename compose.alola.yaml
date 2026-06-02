@@ -1,0 +1,12 @@
+services:
+  teams-bot:
+    environment:
+      ALOLA_SSH_KEY_FILE: /run/secrets/alola_ssh_key
+    secrets:
+      - source: alola_ssh_key
+        target: alola_ssh_key
+        mode: 0400
+
+secrets:
+  alola_ssh_key:
+    file: ${ALOLA_SSH_KEY_SOURCE:?Set ALOLA_SSH_KEY_SOURCE to the host path of your Alola SSH private key}
