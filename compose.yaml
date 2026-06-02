@@ -55,6 +55,7 @@ services:
       - teams_state:/app/state
       - teams_logs:/app/logs
       - ./config/channels.json:/app/config/channels.json:ro
+      - ${HOST_SECRETS_DIR:-./secrets}:/app/secrets:ro
       - ${HOST_WORKSPACE_DIR:-teams_workspace}:${APP_WORKSPACE_DIR:-/app/workspace}
       - teams_workspace_repos:${APP_WORKSPACE_DIR:-/app/workspace}/repos
       - teams_workspace_worktrees:${APP_WORKSPACE_DIR:-/app/workspace}/worktrees

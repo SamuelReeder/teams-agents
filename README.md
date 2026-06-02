@@ -32,7 +32,20 @@ Microsoft Teams bot that dispatches an Oh My Pi/Claude-compatible harness from T
 └── compose.alola.yaml
 ```
 
-Prerequisite: this app shells out to Microsoft Teams helper scripts from the `m365-teams` Claude skill (`auth.py`, `list_messages.py`, `send_chat.py`). Install/authenticate that skill on the host. Docker Compose mounts the host home directory by default so the container can read the same skill scripts and auth state unless `HOST_HOME_DIR` is overridden.
+## Prerequisites
+
+Docker Compose quick start:
+- Docker Engine with the Compose plugin (`docker compose`).
+- Python 3.10+ on the host for the Teams helper scripts.
+- The `m365-teams` Claude skill installed on the host. The bot shells out to that skill's scripts: `auth.py`, `list_messages.py`, and `send_chat.py`.
+- A completed Teams auth flow for those scripts. The quick start runs `auth.py` and then uses `list_chats.py` to find the `chatId`.
+- A harness command available inside the container, such as `omp`. The default home mount usually exposes home-installed harness binaries; otherwise bake the harness into the base image or set `HARNESS_BIN` to an in-container path.
+- A workspace directory on the host for the harness to run in.
+- Membership in the Teams chat the bot will monitor.
+
+Local npm runs additionally require Node.js 20+ and npm on the host. Docker users do not need host Node.js; the image provides Node for the app.
+
+Alola routing additionally requires the Alola SSH key and cluster settings described in [Alola routing](#alola-routing).
 
 ## Quick start: Docker Compose
 
@@ -58,7 +71,17 @@ HARNESS_BIN=omp
 
 Set `HARNESS_BIN` to the harness command or absolute path visible inside the container. If your host home files are not readable by uid/gid `1000:1000`, set `APP_UID` and `APP_GID` in `.env` to your host uid/gid before building the image.
 
-3. Authenticate Teams and find the chat ID to monitor:
+3. If the harness needs provider API keys, add them as files under `./secrets`:
+
+```bash
+mkdir -p secrets
+printf '%s' '<openai-api-key>' > secrets/openai_api_key
+chmod 600 secrets/openai_api_key
+```
+
+Docker Compose mounts `./secrets` read-only at `/app/secrets`, and the bot resolves `secrets/openai_api_key` to `OPENAI_API_KEY` for the spawned harness. Use the normalized lowercase file name for each provider key, such as `anthropic_api_key` for `ANTHROPIC_API_KEY`. Skip this step if your harness gets credentials another way.
+
+4. Authenticate Teams and find the chat ID to monitor:
 
 ```bash
 python3 ~/.claude/skills/m365-teams/scripts/auth.py
@@ -68,7 +91,7 @@ python3 ~/.claude/skills/m365-teams/scripts/list_chats.py --limit 20 --json
 
 Copy the `id` for the Teams chat you want the bot to monitor. That value is the `chatId` in `config/channels.json`.
 
-4. Fill out `config/channels.json`. For one Docker-mounted workspace, the file can be:
+5. Fill out `config/channels.json`. For one Docker-mounted workspace, the file can be:
 
 ```json
 [
@@ -84,7 +107,7 @@ Copy the `id` for the Teams chat you want the bot to monitor. That value is the 
 
 A workspace is treated as an opaque harness working directory. The bot does not require `.claude/`, `.shared/`, `repos`, `worktrees`, or registry files to exist. If those conventional files exist, help/dashboard output may surface them; otherwise the harness simply starts with `cwd` set to the selected workspace.
 
-5. Validate the container configuration:
+6. Validate the container configuration:
 
 ```bash
 docker compose build
@@ -93,7 +116,7 @@ docker compose run --rm teams-bot npm run setup:check
 
 A warning about `ALOLA_SSH_KEY` is expected unless you are using Alola routing.
 
-6. Start the bot:
+7. Start the bot:
 
 ```bash
 docker compose up -d
@@ -102,7 +125,7 @@ docker compose logs -f teams-bot
 
 Dashboard: `http://localhost:3978/`.
 
-7. Send a smoke-test message in the monitored Teams chat:
+8. Send a smoke-test message in the monitored Teams chat:
 
 ```text
 !agent say hello and print the current working directory
@@ -193,14 +216,19 @@ Explicitly configured workspace paths must exist and be readable.
 
 ## Secrets
 
-Secrets are resolved at runtime; they are not baked into the Docker image. For a secret named `OPENAI_API_KEY`, resolution precedence is:
+Secrets are resolved at runtime; they are not baked into the Docker image. For local npm runs, direct `.env` values are acceptable. For Docker or shared deployments, prefer mounted secret files and keep raw key values out of `compose.yaml`, Dockerfiles, image build args, and committed config. The base Compose file mounts `${HOST_SECRETS_DIR:-./secrets}` read-only at `/app/secrets`.
+
+> [!CAUTION]
+> File-based secrets reduce accidental exposure in config, image layers, `docker inspect`, shell history, and environment dumps. They are not a sandbox boundary: once the bot reads a provider key and injects it into a spawned harness, that harness can read, use, print, or exfiltrate it. Treat every harness-visible secret as agent-visible and Teams-visible.
+
+For a secret named `OPENAI_API_KEY`, the Docker-friendly default is a file at `./secrets/openai_api_key`. Full resolution precedence is:
 
 1. `OPENAI_API_KEY_FILE`
 2. `/run/secrets/openai_api_key`
 3. `APP_SECRETS_DIR/openai_api_key`
-4. direct `OPENAI_API_KEY` environment value for local development
+4. direct `OPENAI_API_KEY` environment value
 
-The same naming rule applies to `ANTHROPIC_API_KEY`, `LLM_GATEWAY_API_KEY`, and other allowlisted harness provider keys. Direct values are convenient for local development but are visible to the spawned harness when injected.
+The same naming rule applies to `ANTHROPIC_API_KEY`, `LLM_GATEWAY_API_KEY`, and other allowlisted harness provider keys.
 
 Important exposure model:
 
@@ -234,6 +262,7 @@ Compose defaults are portable:
 - state: `teams_state:/app/state`
 - logs: `teams_logs:/app/logs`
 - channel config: `./config/channels.json:/app/config/channels.json:ro`
+- secrets: `${HOST_SECRETS_DIR:-./secrets}:/app/secrets:ro`
 - workspace: `${HOST_WORKSPACE_DIR:-teams_workspace}:${APP_WORKSPACE_DIR:-/app/workspace}`
 - optional durable workspace source roots: `teams_workspace_repos` and `teams_workspace_worktrees`
 - home: `${HOST_HOME_DIR:-${HOME:-teams_home}}:/home/${APP_USER:-teamsbot}`

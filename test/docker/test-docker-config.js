@@ -122,6 +122,7 @@ describe("Docker deployment config", () => {
 
   it("uses explicit Docker defaults for mounts and dashboard exposure", () => {
     const compose = readText("compose.yaml");
+    assert.ok(compose.includes("${HOST_SECRETS_DIR:-./secrets}:/app/secrets:ro"));
     assert.ok(compose.includes("${HOST_WORKSPACE_DIR:-teams_workspace}:${APP_WORKSPACE_DIR:-/app/workspace}"));
     assert.ok(compose.includes("${HOST_HOME_DIR:-${HOME:-teams_home}}:/home/${APP_USER:-teamsbot}"));
     assert.ok(compose.includes("${HOST_BIND_ADDR:-127.0.0.1}:${PORT:-3978}:3978"));
