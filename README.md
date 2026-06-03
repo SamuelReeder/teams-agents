@@ -285,7 +285,9 @@ The base compose file does not mount a host Docker socket and publishes the dash
 
 ## Alola routing
 
-For Alola deployments, copy the relevant optional values from `config/env.alola.example` into `.env`. Docker Compose Alola deployments must also set `ALOLA_SSH_KEY_SOURCE` and include the Alola override file:
+Alola routing lets a bot deployed on your Docker host or service machine give the agent SSH-backed access to Alola for build/test/GPU/runtime work. It is not a deployment target for the bot itself.
+
+To enable Alola routing, copy the relevant optional values from `config/env.alola.example` into `.env`. Docker Compose deployments with Alola routing must also set `ALOLA_SSH_KEY_SOURCE` and include the Alola override file:
 
 ```bash
 docker compose -f compose.yaml -f compose.alola.yaml run --rm teams-bot npm run setup:check
@@ -308,7 +310,7 @@ bin/alola-session stop --target gfx942
 
 `--alola` in Teams messages is consumed by the bot and is not forwarded to the harness. It records a durable remote execution target for that Teams thread. Build/test/runtime prompts can also infer Alola routing from the prompt; the injected routing context tells the agent to use the app-level CLI.
 
-HPE/Alola deployments usually override these values in `.env` or an override file:
+HPE/Alola routing usually overrides these values in `.env` or an override file:
 
 ```bash
 TEAMS_BOT_IMAGE=teams-bot:hipdnn-agent
