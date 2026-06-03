@@ -177,11 +177,11 @@ const HARNESS_FLAGS = {
   sessionDir: envFlag("HARNESS_SESSION_DIR_FLAG", "--session-dir"),
   resume: envFlag("HARNESS_RESUME_FLAG", "--resume"),
   appendSystemPrompt: envFlag("HARNESS_SYSTEM_PROMPT_FLAG", "--append-system-prompt"),
-  appendSystemPromptFile: envFlag("HARNESS_SYSTEM_PROMPT_FILE_FLAG", "--append-system-prompt-file"),
   skipPermissions: envFlag("HARNESS_SKIP_PERMISSIONS_FLAG", "--dangerously-skip-permissions"),
   mcpConfig: envFlag("HARNESS_MCP_FLAG", "--mcp-config"),
   addDir: envFlag("HARNESS_ADD_DIR_FLAG", "--add-dir"),
   model: envFlag("HARNESS_MODEL_FLAG", "--model"),
+  listModels: envFlag("HARNESS_LIST_MODELS_FLAG", "--list-models"),
 };
 
 const AGENT_PREFIX = envString("AGENT_PREFIX", "!agent") || "!agent";

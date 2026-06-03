@@ -8,6 +8,8 @@ const {
   THREAD_TTL_MS,
   AGENT_PREFIX,
   ALOLA_SESSION_BIN,
+  HARNESS_BIN,
+  HARNESS_CONFIG,
   loadChannels,
   resolveWorkspace,
   workspaceFromPersisted,
@@ -247,6 +249,9 @@ function buildHelpMessage(channel) {
     ? `<b>Workspace</b>: <code>${escapeHtml(workspace.dir)}</code><br><br>`
     : "";
 
+  const modelsCommand = HARNESS_CONFIG.flags.listModels
+    ? `<code>!models [filter]</code> — list available models (e.g. <code>!models haiku</code>)<br>`
+    : "";
   return `<b>Teams Agents</b><br><br>` +
     prefixNote +
     workspaceLine +
@@ -258,7 +263,7 @@ function buildHelpMessage(channel) {
     `<b>Execution</b>: agents run locally in the selected workspace. ROCm builds/tests/benchmarks, CMake/Ninja/ctest, provider verification, hipcc, rocminfo, and GPU work should use durable Alola sessions through <code>${escapeHtml(ALOLA_SESSION_BIN)}</code>.<br><br>` +
     `<b>Commands</b>:<br>` +
     `<code>!help</code> — this message<br>` +
-    `<code>!models [filter]</code> — list available models (e.g. <code>!models haiku</code>)<br>` +
+    modelsCommand +
     `<code>!cron &lt;interval&gt; [--fresh] &lt;prompt&gt;</code> — recurring agent (e.g. <code>!cron 2d check my PRs</code>; <code>--fresh</code> = no session memory between runs)<br>` +
     `<code>!cron-cancel &lt;id&gt;</code> — cancel a recurring task<br>` +
     `<code>!cron-restart &lt;id&gt;</code> — restart an expired recurring task<br>` +
@@ -299,11 +304,16 @@ function handleCommand(channel, text, from, replyToId) {
   }
 
   if (kind === "models") {
+    const listModelsFlag = HARNESS_CONFIG.flags.listModels;
+    if (!listModelsFlag) {
+      sendToTeams(chatId, "Model listing is not supported by the configured harness.", replyToId);
+      return true;
+    }
     const { execFileSync } = require("child_process");
-    const { HARNESS_BIN } = require("../config/env");
     const search = text.trim() === "!models" ? "" : text.slice("!models ".length).trim();
+    const args = search ? [`${listModelsFlag}=${search}`] : [listModelsFlag];
     try {
-      const out = execFileSync(HARNESS_BIN, [`--list-models=${search}`], {
+      const out = execFileSync(HARNESS_BIN, args, {
         timeout: 30000,
         stdio: ["ignore", "pipe", "pipe"],
       }).toString();

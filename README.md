@@ -13,7 +13,6 @@ Microsoft Teams bot that dispatches an Oh My Pi/Claude-compatible harness from T
 │   ├── env.example
 │   └── env.alola.example
 ├── scripts/
-│   ├── alola-session.js           # Alola CLI launcher
 │   ├── setup.js                   # setup/config validation
 │   └── teams/
 │       └── reply.py
@@ -213,6 +212,19 @@ Workspace resolution order is:
 3. `$HOME`
 
 Explicitly configured workspace paths must exist and be readable.
+
+## Harness integration
+
+The bot is not hard-coded to one harness binary. It starts `HARNESS_BIN` with a configured working directory, passes a non-interactive prompt, and reads stdout/stderr for the Teams reply. Defaults target an Oh My Pi/Claude-compatible CLI:
+
+```bash
+HARNESS_BIN=omp
+HARNESS_BASE_ARGS=--print
+HARNESS_PROMPT_FLAG=-p
+HARNESS_MODEL_FLAG=--model
+```
+
+For another harness, set `HARNESS_BIN`, `HARNESS_BASE_ARGS`, and any `HARNESS_*_FLAG` values needed by that CLI. Optional flags can be disabled by setting the value empty in `.env`; for example, `HARNESS_SESSION_FLAG=` disables session-id injection. Leading `--flags` in Teams messages are forwarded verbatim to the harness before the prompt. `!models` uses `HARNESS_LIST_MODELS_FLAG` and can be disabled with `HARNESS_LIST_MODELS_FLAG=` if the harness cannot list models.
 
 ## Secrets
 
