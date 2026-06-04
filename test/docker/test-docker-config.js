@@ -128,6 +128,7 @@ describe("Docker deployment config", () => {
     ]) {
       assert.ok(compose.includes(key), `${key} missing from compose environment`);
     }
+    assert.ok(compose.includes("${TEAMS_SCRIPTS_DIR:-${TEAMS_SCRIPT_DIR:-/home/${APP_USER:-teamsbot}/.claude/skills/m365-teams/scripts}}"));
     assert.ok(compose.includes("${HOST_HOME_DIR:-${HOME:-teams_home}}:/home/${APP_USER:-teamsbot}"));
   });
 

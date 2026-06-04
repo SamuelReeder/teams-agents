@@ -22,7 +22,7 @@ services:
       APP_LOG_DIR: /app/logs
       APP_SECRETS_DIR: /app/secrets
       APP_WORKSPACE_DIR: ${APP_WORKSPACE_DIR:-/app/workspace}
-      TEAMS_SCRIPTS_DIR: ${TEAMS_SCRIPTS_DIR:-/home/${APP_USER:-teamsbot}/.claude/skills/m365-teams/scripts}
+      TEAMS_SCRIPTS_DIR: ${TEAMS_SCRIPTS_DIR:-${TEAMS_SCRIPT_DIR:-/home/${APP_USER:-teamsbot}/.claude/skills/m365-teams/scripts}}
       TEAMS_REPLY_SCRIPT: /app/scripts/teams/reply.py
       HARNESS_BIN: ${HARNESS_BIN:-omp}
       HARNESS_BASE_ARGS: ${HARNESS_BASE_ARGS:---print}

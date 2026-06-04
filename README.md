@@ -35,9 +35,9 @@ Microsoft Teams bot that dispatches an Oh My Pi/Claude-compatible harness from T
 
 Docker Compose quick start:
 - Docker Engine with the Compose plugin (`docker compose`).
-- Python 3.10+ on the host for the Teams helper scripts.
-- The `m365-teams` Claude skill installed on the host. The bot shells out to that skill's scripts: `auth.py`, `list_messages.py`, and `send_chat.py`.
-- A completed Teams auth flow for those scripts. The quick start runs `auth.py` and then uses `list_chats.py` to find the `chatId`.
+- Python 3.10+ for the Teams helper scripts. The Docker image includes Python for runtime use; host Python is only needed when you run the helper scripts from the host.
+- The `m365-teams` Claude skill scripts available at `TEAMS_SCRIPTS_DIR` inside the bot runtime. The default is `$HOME/.claude/skills/m365-teams/scripts` as seen by the bot process, and must contain `auth.py`, `list_chats.py`, `list_messages.py`, and `send_chat.py`.
+- A completed Teams auth flow for that same bot-visible home/scripts environment. The quick start runs `auth.py` and then uses `list_chats.py` to find the `chatId`.
 - A harness command available inside the container, such as `omp`. The default home mount usually exposes home-installed harness binaries; otherwise bake the harness into the base image or set `HARNESS_BIN` to an in-container path.
 - A workspace directory on the host for the harness to run in.
 - Membership in the Teams chat the bot will monitor.
@@ -51,7 +51,7 @@ Alola routing additionally requires the Alola SSH key and cluster settings descr
 Use Docker Compose as the default path. It makes the runtime boundary explicit: the bot, state, logs, secrets, and mounted workspace are the same shape as a deployed instance.
 
 > [!CAUTION]
-> Docker Compose mounts your host home directory into the container by default: `${HOST_HOME_DIR:-${HOME:-teams_home}}:/home/${APP_USER:-teamsbot}`. This makes Teams auth, `~/.claude` skill scripts, and home-installed harness binaries available in the container, but the bot and spawned harness can read any mounted home files that the container user can read. Set `HOST_HOME_DIR` to a dedicated service-account home, or to `teams_home` for a named Docker volume, if you want a smaller mount.
+> Docker Compose mounts your host home directory into the container by default: `${HOST_HOME_DIR:-${HOME:-teams_home}}:/home/${APP_USER:-teamsbot}`. This makes Teams auth, `~/.claude` skill scripts, and home-installed harness binaries available in the container, but the bot and spawned harness can read any mounted home files that the container user can read. Set `HOST_HOME_DIR` to a dedicated service-account home, or to `teams_home` for a named Docker volume, if you want a smaller mount. If you use a dedicated home or named volume, install/copy the `m365-teams` scripts and complete Teams auth in that bot-visible home, or bake/copy the scripts elsewhere and set `TEAMS_SCRIPTS_DIR` to that in-container path.
 
 1. Copy the templates:
 
@@ -80,12 +80,13 @@ chmod 600 secrets/openai_api_key
 
 Docker Compose mounts `./secrets` read-only at `/app/secrets`, and the bot resolves `secrets/openai_api_key` to `OPENAI_API_KEY` for the spawned harness. Use the normalized lowercase file name for each provider key, such as `anthropic_api_key` for `ANTHROPIC_API_KEY`. Skip this step if your harness gets credentials another way.
 
-4. Authenticate Teams and find the chat ID to monitor:
+4. Make sure the Teams helper scripts are visible where the bot will see them, then authenticate Teams and find the chat ID to monitor:
 
 ```bash
-python3 ~/.claude/skills/m365-teams/scripts/auth.py
-python3 ~/.claude/skills/m365-teams/scripts/auth.py --complete <device_code>
-python3 ~/.claude/skills/m365-teams/scripts/list_chats.py --limit 20 --json
+TEAMS_SCRIPTS_DIR="${TEAMS_SCRIPTS_DIR:-$HOME/.claude/skills/m365-teams/scripts}"
+python3 "$TEAMS_SCRIPTS_DIR/auth.py"
+python3 "$TEAMS_SCRIPTS_DIR/auth.py" --complete <device_code>
+python3 "$TEAMS_SCRIPTS_DIR/list_chats.py" --limit 20 --json
 ```
 
 Copy the `id` for the Teams chat you want the bot to monitor. That value is the `chatId` in `config/channels.json`.
@@ -132,6 +133,9 @@ Dashboard: `http://localhost:3978/`.
 
 The bot should reply in the same Teams thread.
 
+> [!NOTE]
+> Teams replies can be a little leisurely, especially on the first run while the harness wakes up and stretches. Wait a bit before retrying; if nothing shows up, check for startup or send errors with `docker compose logs -f teams-bot`.
+
 ## Local npm run
 
 Use the host-local Node path when Docker is unavailable or when you intentionally want the bot to run directly on the host.
@@ -147,9 +151,10 @@ cp config/channels.example.json config/channels.json
 2. Authenticate Teams and find the chat ID to monitor:
 
 ```bash
-python3 ~/.claude/skills/m365-teams/scripts/auth.py
-python3 ~/.claude/skills/m365-teams/scripts/auth.py --complete <device_code>
-python3 ~/.claude/skills/m365-teams/scripts/list_chats.py --limit 20 --json
+TEAMS_SCRIPTS_DIR="${TEAMS_SCRIPTS_DIR:-$HOME/.claude/skills/m365-teams/scripts}"
+python3 "$TEAMS_SCRIPTS_DIR/auth.py"
+python3 "$TEAMS_SCRIPTS_DIR/auth.py" --complete <device_code>
+python3 "$TEAMS_SCRIPTS_DIR/list_chats.py" --limit 20 --json
 ```
 
 Copy the `id` for the Teams chat you want the bot to monitor. That value is the `chatId` in `config/channels.json`.
@@ -176,6 +181,14 @@ npm start
 ```
 
 Dashboard: `http://localhost:3978/`.
+
+## Teams helper scripts
+
+`TEAMS_SCRIPTS_DIR` is the bot's path to the `m365-teams` skill scripts directory. It is not resolved from the workspace. The directory must be visible inside the bot runtime and contain `auth.py`, `list_chats.py`, `list_messages.py`, and `send_chat.py`; `TEAMS_SCRIPT_DIR` is accepted as a singular alias.
+
+With default Docker Compose settings, your host home is mounted as the bot home, so a host install at `$HOME/.claude/skills/m365-teams/scripts` appears inside the container at `/home/${APP_USER:-teamsbot}/.claude/skills/m365-teams/scripts`. If you set `HOST_HOME_DIR` to a dedicated service-account home, install/copy the skill and complete Teams auth under that home. If you set `HOST_HOME_DIR=teams_home`, bake/copy the scripts into the image or volume and set `TEAMS_SCRIPTS_DIR` to their in-container path.
+
+`TEAMS_REPLY_SCRIPT` defaults to this repo's `scripts/teams/reply.py`. That wrapper also uses `TEAMS_SCRIPTS_DIR` to import the skill's `skype_client`, so direct sends, message polling, and thread replies all use the same script-directory setting.
 
 ## Channel configuration
 
@@ -309,6 +322,9 @@ bin/alola-session stop --target gfx942
 ```
 
 `--alola` in Teams messages is consumed by the bot and is not forwarded to the harness. It records a durable remote execution target for that Teams thread. Build/test/runtime prompts can also infer Alola routing from the prompt; the injected routing context tells the agent to use the app-level CLI.
+
+> [!NOTE]
+> Alola routing can be slow while SSH sessions, enroot containers, or GPU allocations spin up. Give it a moment before poking it, and use `bin/alola-session status --target <target>` or `docker compose logs -f teams-bot` if you need to see where it got stuck.
 
 HPE/Alola routing usually overrides these values in `.env` or an override file:
 

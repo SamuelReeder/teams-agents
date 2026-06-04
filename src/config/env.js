@@ -166,8 +166,17 @@ for (const dir of [STATE_DIR, LOG_DIR]) {
   if (dir) fs.mkdirSync(dir, { recursive: true });
 }
 
-const SCRIPTS_DIR = envPath("TEAMS_SCRIPTS_DIR", path.join(HOME, ".claude/skills/m365-teams/scripts"));
+const DEFAULT_TEAMS_SCRIPTS_DIR = path.join(HOME, ".claude/skills/m365-teams/scripts");
+const SCRIPTS_DIR = resolveAppPath(
+  envString("TEAMS_SCRIPTS_DIR", null) ||
+  envString("TEAMS_SCRIPT_DIR", null) ||
+  DEFAULT_TEAMS_SCRIPTS_DIR
+);
 const REPLY_SCRIPT = envPath("TEAMS_REPLY_SCRIPT", path.join(ROOT_DIR, "scripts/teams/reply.py"));
+
+function teamsScriptPath(scriptName) {
+  return path.join(SCRIPTS_DIR, scriptName);
+}
 const HARNESS_BIN = resolveHarnessBin();
 const DEFAULT_BASE_ARGS = ["--print"];
 const HARNESS_BASE_ARGS = Object.freeze(parseArgList(process.env.HARNESS_BASE_ARGS, DEFAULT_BASE_ARGS));
@@ -550,6 +559,7 @@ module.exports = {
   SECRETS_DIR,
   SCRIPTS_DIR,
   REPLY_SCRIPT,
+  teamsScriptPath,
   HARNESS_BIN,
   HARNESS_CONFIG,
   HARNESS_SECRET_ENV,

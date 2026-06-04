@@ -2,7 +2,7 @@ const { execFileSync } = require("child_process");
 const fs = require("fs");
 const path = require("path");
 const { marked } = require("marked");
-const { SCRIPTS_DIR, REPLY_SCRIPT, ROOT_DIR, STATE_DIR } = require("../config/env");
+const { REPLY_SCRIPT, ROOT_DIR, STATE_DIR, teamsScriptPath } = require("../config/env");
 
 marked.setOptions({ breaks: true, gfm: true });
 const AI_PREFIX = "[AI]";
@@ -30,7 +30,7 @@ function loadBotIds() {
 
 function sendToTeams(chatId, message, replyToId, isAgentResponse = false) {
   try {
-    const script = replyToId ? REPLY_SCRIPT : path.join(SCRIPTS_DIR, "send_chat.py");
+    const script = replyToId ? REPLY_SCRIPT : teamsScriptPath("send_chat.py");
     const args = replyToId
       ? [script, "--chat-id", chatId, "--reply-to", replyToId, "-m", "-", "--html", "--json"]
       : [script, "--chat-id", chatId, "-m", "-", "--html", "--json"];
@@ -124,7 +124,7 @@ function fetchMessages(chatId, limit = 10) {
   try {
     const result = execFileSync(
       "python3",
-      [path.join(SCRIPTS_DIR, "list_messages.py"), "--chat-id", chatId, "--limit", String(limit), "--json"],
+      [teamsScriptPath("list_messages.py"), "--chat-id", chatId, "--limit", String(limit), "--json"],
       { timeout: 30000, stdio: ["ignore", "pipe", "pipe"] }
     );
     return JSON.parse(result.toString()) || [];

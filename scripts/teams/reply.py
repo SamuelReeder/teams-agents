@@ -10,13 +10,19 @@ Usage:
 """
 
 import argparse
+import os
 import json
 import sys
 import urllib.parse
 import urllib.request
 from pathlib import Path
 
-sys.path.insert(0, str(Path.home() / ".claude" / "skills" / "m365-teams" / "scripts"))
+teams_scripts_dir = (
+    os.environ.get("TEAMS_SCRIPTS_DIR")
+    or os.environ.get("TEAMS_SCRIPT_DIR")
+    or str(Path.home() / ".claude" / "skills" / "m365-teams" / "scripts")
+)
+sys.path.insert(0, teams_scripts_dir)
 from skype_client import SkypeClient
 
 

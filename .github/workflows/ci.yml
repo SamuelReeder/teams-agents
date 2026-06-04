@@ -20,9 +20,11 @@ jobs:
       - name: Prepare setup check fixtures
         run: |
           mkdir -p /tmp/teams-scripts
+          printf '#!/usr/bin/env python3\n' > /tmp/teams-scripts/auth.py
+          printf '#!/usr/bin/env python3\n' > /tmp/teams-scripts/list_chats.py
           printf '#!/usr/bin/env python3\n' > /tmp/teams-scripts/list_messages.py
           printf '#!/usr/bin/env python3\n' > /tmp/teams-scripts/send_chat.py
-          chmod +x /tmp/teams-scripts/list_messages.py /tmp/teams-scripts/send_chat.py
+          chmod +x /tmp/teams-scripts/auth.py /tmp/teams-scripts/list_chats.py /tmp/teams-scripts/list_messages.py /tmp/teams-scripts/send_chat.py
           mkdir -p config
           cat > config/channels.json <<'JSON'
           [
