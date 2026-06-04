@@ -6,7 +6,10 @@ const path = require("path");
 
 const {
   HARNESS_CONFIG,
+  ROOT_DIR,
+  buildRunnerConfig,
   channelMaxConcurrentAgents,
+  resolveRunnerAllowedRoots,
   resolveWorkspace,
   validateChannels,
   loadChannels,
@@ -84,6 +87,42 @@ describe("workspace resolution", () => {
       () => resolveWorkspace({ chatId: "chat-a", label: "Alpha", workspace: missing }, { rootDir: root, home, env: { HOME: home } }),
       /Configured workspace for Alpha is not a readable directory/
     );
+  });
+});
+
+describe("runner configuration", () => {
+  it("resolves runner URL, token file, port, and allowed roots", () => {
+    const root = tempDir();
+    const home = mkdirp(path.join(root, "home"));
+    const first = mkdirp(path.join(root, "workspace-a"));
+    const second = mkdirp(path.join(home, "workspace-b"));
+    const tokenFile = path.join(root, "runner-token");
+    fs.writeFileSync(tokenFile, "shared-token\n");
+
+    const config = buildRunnerConfig({
+      HOME: home,
+      AGENT_RUNNER_URL: "http://agent-runner:3979",
+      AGENT_RUNNER_BIND_HOST: "0.0.0.0",
+      AGENT_RUNNER_PORT: "4987",
+      AGENT_RUNNER_TOKEN_FILE: tokenFile,
+      AGENT_RUNNER_ALLOWED_ROOTS: `${first},~/workspace-b,${first}`,
+    });
+
+    assert.equal(config.url, "http://agent-runner:3979");
+    assert.equal(config.bindHost, "0.0.0.0");
+    assert.equal(config.port, 4987);
+    assert.equal(config.token, "shared-token");
+    assert.deepEqual(config.allowedRoots, [first, second]);
+  });
+
+  it("defaults runner allowed roots to APP_WORKSPACE_DIR before the repo root", () => {
+    const root = tempDir();
+    const workspace = mkdirp(path.join(root, "workspace"));
+
+    const roots = resolveRunnerAllowedRoots({ APP_WORKSPACE_DIR: workspace });
+
+    assert.equal(roots[0], workspace);
+    assert.ok(roots.includes(ROOT_DIR));
   });
 });
 

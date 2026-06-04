@@ -37,8 +37,8 @@ Docker Compose quick start:
 - Docker Engine with the Compose plugin (`docker compose`).
 - Python 3.10+ for the Teams helper scripts. The Docker image includes Python for runtime use; host Python is only needed when you run the helper scripts from the host.
 - The `m365-teams` Claude skill scripts available at `TEAMS_SCRIPTS_DIR` inside the bot runtime. The default is `$HOME/.claude/skills/m365-teams/scripts` as seen by the bot process, and must contain `auth.py`, `list_chats.py`, `list_messages.py`, and `send_chat.py`.
-- A completed Teams auth flow for that same bot-visible home/scripts environment. The quick start runs `auth.py` and then uses `list_chats.py` to find the `chatId`.
-- A harness command available inside the container, such as `omp`. The default home mount usually exposes home-installed harness binaries; otherwise bake the harness into the base image or set `HARNESS_BIN` to an in-container path.
+- A completed Teams auth flow for that same bot-visible home/scripts environment. Teams polling and sending are always managed by the bot container/process.
+- A harness command available inside the agent-runner runtime, such as `omp`. In Docker Compose runner mode the runner does not mount the bot's Teams-auth home, so bake the harness into the image or mount a dedicated runner home/tool directory with `RUNNER_HOME_DIR`.
 - A workspace directory on the host for the harness to run in.
 - Membership in the Teams chat the bot will monitor.
 
@@ -51,7 +51,7 @@ Alola routing additionally requires the Alola SSH key and cluster settings descr
 Use Docker Compose as the default path. It makes the runtime boundary explicit: the bot, state, logs, secrets, and mounted workspace are the same shape as a deployed instance.
 
 > [!CAUTION]
-> Docker Compose mounts your host home directory into the container by default: `${HOST_HOME_DIR:-${HOME:-teams_home}}:/home/${APP_USER:-teamsbot}`. This makes Teams auth, `~/.claude` skill scripts, and home-installed harness binaries available in the container, but the bot and spawned harness can read any mounted home files that the container user can read. Set `HOST_HOME_DIR` to a dedicated service-account home, or to `teams_home` for a named Docker volume, if you want a smaller mount. If you use a dedicated home or named volume, install/copy the `m365-teams` scripts and complete Teams auth in that bot-visible home, or bake/copy the scripts elsewhere and set `TEAMS_SCRIPTS_DIR` to that in-container path.
+> Docker Compose runner mode isolates spawned agents from the bot's Teams scripts, Teams auth home, and `config/channels.json` by running the harness in the `agent-runner` sidecar. The `teams-bot` service still mounts the bot-visible home for Teams auth/scripts; the `agent-runner` service mounts `RUNNER_HOME_DIR` or the `teams_runner_home` named volume instead. Do not point `RUNNER_HOME_DIR` at the same home that contains Teams auth unless you intentionally want agents to see those files.
 
 1. Copy the templates:
 
@@ -68,7 +68,7 @@ APP_WORKSPACE_DIR=/app/workspace
 HARNESS_BIN=omp
 ```
 
-Set `HARNESS_BIN` to the harness command or absolute path visible inside the container. If your host home files are not readable by uid/gid `1000:1000`, set `APP_UID` and `APP_GID` in `.env` to your host uid/gid before building the image.
+Set `HARNESS_BIN` to the harness command or absolute path visible inside the `agent-runner` container. If your host home files are not readable by uid/gid `1000:1000`, set `APP_UID` and `APP_GID` in `.env` to your host uid/gid before building the image. If the harness is installed under a user home, prefer a dedicated `RUNNER_HOME_DIR` containing only runner tools and harness state, not Teams auth or Teams skill scripts.
 
 3. If the harness needs provider API keys, add them as files under `./secrets`:
 
@@ -78,7 +78,7 @@ printf '%s' '<openai-api-key>' > secrets/openai_api_key
 chmod 600 secrets/openai_api_key
 ```
 
-Docker Compose mounts `./secrets` read-only at `/app/secrets`, and the bot resolves `secrets/openai_api_key` to `OPENAI_API_KEY` for the spawned harness. Use the normalized lowercase file name for each provider key, such as `anthropic_api_key` for `ANTHROPIC_API_KEY`. Skip this step if your harness gets credentials another way.
+Docker Compose mounts `./secrets` read-only into `agent-runner` at `/app/secrets`, and the runner resolves `secrets/openai_api_key` to `OPENAI_API_KEY` for spawned harness processes. Use the normalized lowercase file name for each provider key, such as `anthropic_api_key` for `ANTHROPIC_API_KEY`. Skip this step if your harness gets credentials another way.
 
 4. Make sure the Teams helper scripts are visible where the bot will see them, then authenticate Teams and find the chat ID to monitor:
 
@@ -138,7 +138,7 @@ The bot should reply in the same Teams thread.
 
 ## Local npm run
 
-Use the host-local Node path when Docker is unavailable or when you intentionally want the bot to run directly on the host.
+Use the host-local Node path when Docker is unavailable or when you intentionally want the bot to run directly on the host. In this mode the bot spawns the harness directly; it is useful for development but is not a Teams filesystem isolation boundary.
 
 1. Install dependencies and copy the templates if you have not already done so:
 
@@ -228,7 +228,7 @@ Explicitly configured workspace paths must exist and be readable.
 
 ## Harness integration
 
-The bot is not hard-coded to one harness binary. It starts `HARNESS_BIN` with a configured working directory, passes a non-interactive prompt, and reads stdout/stderr for the Teams reply. Defaults target an Oh My Pi/Claude-compatible CLI:
+The bot is not hard-coded to one harness binary. It builds harness arguments with a configured working directory, passes a non-interactive prompt, and reads stdout/stderr for the Teams reply. In Docker runner mode those requests go to the `agent-runner` sidecar; when `AGENT_RUNNER_URL` is unset the bot falls back to direct local spawn. Defaults target an Oh My Pi/Claude-compatible CLI:
 
 ```bash
 HARNESS_BIN=omp
@@ -239,12 +239,25 @@ HARNESS_MODEL_FLAG=--model
 
 For another harness, set `HARNESS_BIN`, `HARNESS_BASE_ARGS`, and any `HARNESS_*_FLAG` values needed by that CLI. Optional flags can be disabled by setting the value empty in `.env`; for example, `HARNESS_SESSION_FLAG=` disables session-id injection. Leading `--flags` in Teams messages are forwarded verbatim to the harness before the prompt. `!models` uses `HARNESS_LIST_MODELS_FLAG` and can be disabled with `HARNESS_LIST_MODELS_FLAG=` if the harness cannot list models.
 
+## Agent runner isolation
+
+Docker Compose starts two app containers on the private Compose network:
+
+- `teams-bot` owns Teams polling, Teams sending, thread state, `config/channels.json`, `TEAMS_SCRIPTS_DIR`, and the bot-visible home where Teams auth lives.
+- `agent-runner` owns harness execution, model listing, provider secret files, the mounted workspace, and optional Alola SSH access. It does not mount `config/channels.json`, `TEAMS_SCRIPTS_DIR`, or the bot home.
+
+The bot sends `args`, `cwd`, timeout, and Alola-routing intent to `agent-runner` over HTTP. The runner validates `cwd` against `AGENT_RUNNER_ALLOWED_ROOTS` before spawning the harness and builds the harness environment from its own mounted secrets. Set `AGENT_RUNNER_TOKEN` or `AGENT_RUNNER_TOKEN_FILE` on both services if you want a shared bearer token on the private API.
+
+Runner mode is the Teams isolation boundary. Direct local mode remains useful for development, but the harness then runs in the same process environment and filesystem view as the bot. Runner mode also does not hide secrets intentionally mounted into the runner: provider API keys and Alola SSH access are agent-visible by design. If the workspace itself contains Teams auth/config files, agents can read them because the workspace is intentionally mounted into the runner.
+
+Provide the harness to `agent-runner` without mounting the Teams-auth home: bake it into the image, install it in a custom base image, or set `RUNNER_HOME_DIR` to a dedicated home/tool directory that contains only runner material. Do not reuse `HOST_HOME_DIR` as `RUNNER_HOME_DIR` unless you accept exposing that home to agents.
+
 ## Secrets
 
-Secrets are resolved at runtime; they are not baked into the Docker image. For local npm runs, direct `.env` values are acceptable. For Docker or shared deployments, prefer mounted secret files and keep raw key values out of `compose.yaml`, Dockerfiles, image build args, and committed config. The base Compose file mounts `${HOST_SECRETS_DIR:-./secrets}` read-only at `/app/secrets`.
+Secrets are resolved at runtime; they are not baked into the Docker image. For local npm runs, direct `.env` values are acceptable. For Docker or shared deployments, prefer mounted secret files and keep raw key values out of `compose.yaml`, Dockerfiles, image build args, and committed config. The base Compose file mounts `${HOST_SECRETS_DIR:-./secrets}` read-only into `agent-runner` at `/app/secrets`; the `teams-bot` service does not mount that secret directory in isolated mode.
 
 > [!CAUTION]
-> File-based secrets reduce accidental exposure in config, image layers, `docker inspect`, shell history, and environment dumps. They are not a sandbox boundary: once the bot reads a provider key and injects it into a spawned harness, that harness can read, use, print, or exfiltrate it. Treat every harness-visible secret as agent-visible and Teams-visible.
+> File-based secrets reduce accidental exposure in config, image layers, `docker inspect`, shell history, and environment dumps. They are not a sandbox boundary: once the runner reads a provider key and injects it into a spawned harness, that harness can read, use, print, or exfiltrate it. Treat every runner-visible secret as agent-visible and Teams-visible.
 
 For a secret named `OPENAI_API_KEY`, the Docker-friendly default is a file at `./secrets/openai_api_key`. Full resolution precedence is:
 
@@ -257,13 +270,12 @@ The same naming rule applies to `ANTHROPIC_API_KEY`, `LLM_GATEWAY_API_KEY`, and 
 
 Important exposure model:
 
-- Bot-only Teams credentials and Teams helper script state are not passed to spawned harness processes.
-- Harness-required LLM/provider keys are passed only by explicit allowlist. If the harness can use a key, an agent can expose or misuse it.
-- `ALOLA_SSH_KEY` is handled as a path secret. The bot passes a readable key path only to Alola-routed harness runs; it does not read private key material into logs or ordinary harness environments.
+- In runner mode, bot-only Teams credentials, Teams helper script state, and `config/channels.json` are neither passed to nor mounted into `agent-runner`.
+- In direct local mode, bot-only Teams credentials are still excluded from the harness environment, but local filesystem access is not isolated from the bot.
+- Harness-required LLM/provider keys are passed only by explicit allowlist from runner-local env/secret files. If the harness can use a key, an agent can expose or misuse it.
+- `ALOLA_SSH_KEY` is handled as a path secret. In Compose Alola mode the key is mounted into `agent-runner`, not `teams-bot`; agents can intentionally use `bin/alola-session` because Alola routing is a runner capability.
 - Docker secrets and `*_FILE` variables protect against repo/image/log leakage. They are not a sandbox boundary once a child process can read the file or value.
 - Agent output is not redacted before posting to Teams. Treat every harness-visible value as chat-visible.
-
-For stronger isolation, run the harness under a separate user/container or broker privileged operations through the bot instead of giving raw credentials to the harness. Anyone who can trigger the harness can execute code in the configured workspace; keep monitored chat membership tight.
 
 ## Docker Compose
 
@@ -271,7 +283,7 @@ Default build and run:
 
 ```bash
 docker compose up -d --build
-docker compose logs -f teams-bot
+docker compose logs -f teams-bot agent-runner
 ```
 
 Use a custom base image:
@@ -282,32 +294,33 @@ BASE_IMAGE=my-node-runtime:tag docker compose build
 
 Custom `BASE_IMAGE` values must be Debian/Ubuntu-compatible because the Dockerfile uses `apt-get` in the app layer. If the base does not already provide `node >=20` and `npm` on `PATH`, the layer installs Node.js 20 from NodeSource.
 
-Compose defaults are portable:
+Compose defaults are portable and intentionally split between bot-owned and runner-owned mounts:
 
-- state: `teams_state:/app/state`
-- logs: `teams_logs:/app/logs`
-- channel config: `./config/channels.json:/app/config/channels.json:ro`
-- secrets: `${HOST_SECRETS_DIR:-./secrets}:/app/secrets:ro`
-- workspace: `${HOST_WORKSPACE_DIR:-teams_workspace}:${APP_WORKSPACE_DIR:-/app/workspace}`
-- optional durable workspace source roots: `teams_workspace_repos` and `teams_workspace_worktrees`
-- home: `${HOST_HOME_DIR:-${HOME:-teams_home}}:/home/${APP_USER:-teamsbot}`
-- dashboard port: `${HOST_BIND_ADDR:-127.0.0.1}:${PORT:-3978}:3978`
+- shared state: `teams_state:/app/state`
+- shared logs: `teams_logs:/app/logs`
+- bot-only channel config: `./config/channels.json:/app/config/channels.json:ro`
+- runner-only provider secrets: `${HOST_SECRETS_DIR:-./secrets}:/app/secrets:ro`
+- workspace mounted into both services: `${HOST_WORKSPACE_DIR:-teams_workspace}:${APP_WORKSPACE_DIR:-/app/workspace}`
+- optional durable workspace source roots mounted into both services: `teams_workspace_repos` and `teams_workspace_worktrees`
+- bot-only home for Teams auth/scripts: `${HOST_HOME_DIR:-${HOME:-teams_home}}:/home/${APP_USER:-teamsbot}`
+- runner-only home/tool volume: `${RUNNER_HOME_DIR:-teams_runner_home}:/home/${APP_USER:-teamsbot}`
+- private runner API: `http://agent-runner:${AGENT_RUNNER_PORT:-3979}` on the Compose network only
+- dashboard port published only by `teams-bot`: `${HOST_BIND_ADDR:-127.0.0.1}:${PORT:-3978}:3978`
 
-Compose uses `.env` for variable interpolation but does not pass the entire `.env` file into the container. Runtime channel identity remains `config/channels.json`.
-The base compose file does not mount a host Docker socket and publishes the dashboard on host loopback by default. It does mount host `$HOME` by default for Teams auth and home-installed harness access; set `HOST_HOME_DIR=teams_home` to use a named Docker volume instead, or set `HOST_HOME_DIR` to a dedicated service-account home.
+Compose uses `.env` for variable interpolation but does not pass the entire `.env` file into either container. Runtime channel identity remains `config/channels.json` in the bot service. The base compose file does not mount a host Docker socket and publishes the dashboard on host loopback by default.
 
 ## Alola routing
 
 Alola routing lets a bot deployed on your Docker host or service machine give the agent SSH-backed access to Alola for build/test/GPU/runtime work. It is not a deployment target for the bot itself.
 
-To enable Alola routing, copy the relevant optional values from `config/env.alola.example` into `.env`. Docker Compose deployments with Alola routing must also set `ALOLA_SSH_KEY_SOURCE` and include the Alola override file:
+To enable Alola routing, copy the relevant optional values from `config/env.alola.example` into `.env`. Docker Compose deployments with Alola routing must also set `ALOLA_SSH_KEY_SOURCE` and include the Alola override file. The override mounts the SSH key into `agent-runner`, not `teams-bot`.
 
 ```bash
 docker compose -f compose.yaml -f compose.alola.yaml run --rm teams-bot npm run setup:check
 docker compose -f compose.yaml -f compose.alola.yaml up -d --build
 ```
 
-The app-level CLI is `bin/alola-session` and is also exposed as the package binary `alola-session`.
+The app-level CLI is `bin/alola-session` and is also exposed as the package binary `alola-session`. In runner mode the harness invokes it inside `agent-runner`.
 
 Examples:
 
@@ -321,10 +334,10 @@ bin/alola-session attach --target gfx942
 bin/alola-session stop --target gfx942
 ```
 
-`--alola` in Teams messages is consumed by the bot and is not forwarded to the harness. It records a durable remote execution target for that Teams thread. Build/test/runtime prompts can also infer Alola routing from the prompt; the injected routing context tells the agent to use the app-level CLI.
+`--alola` in Teams messages is consumed by the bot and is not forwarded to the harness. It records a durable remote execution target for that Teams thread. Build/test/runtime prompts can also infer Alola routing from the prompt; the injected routing context tells the agent to use the app-level CLI from inside `agent-runner`.
 
 > [!NOTE]
-> Alola routing can be slow while SSH sessions, enroot containers, or GPU allocations spin up. Give it a moment before poking it, and use `bin/alola-session status --target <target>` or `docker compose logs -f teams-bot` if you need to see where it got stuck.
+> Alola routing can be slow while SSH sessions, enroot containers, or GPU allocations spin up. Give it a moment before poking it, and use `bin/alola-session status --target <target>` from the runner context or `docker compose logs -f teams-bot agent-runner` if you need to see where it got stuck.
 
 HPE/Alola routing usually overrides these values in `.env` or an override file:
 
@@ -335,7 +348,9 @@ BASE_IMAGE=registry-sc-harbor.amd.com/miopen-images/hipdnn_env@sha256:d9e27314d0
 APP_USER=sareeder
 APP_UID=1038
 APP_GID=1037
+# Provide the harness in the runner image or a dedicated runner home; do not reuse HOST_HOME_DIR for runner tools.
 HARNESS_BIN=/home/sareeder/.local/bin/omp
+RUNNER_HOME_DIR=/home/sareeder/teams-agent-runner-home
 HOST_HOME_DIR=/home/sareeder
 ALOLA_USER=sareeder
 ALOLA_LOGIN_NODES=03,04
@@ -381,4 +396,4 @@ Run the full suite:
 npm test
 ```
 
-The suite covers flag parsing, harness arg ordering, workspace fallback, channel schema validation, per-channel model/concurrency defaults, secret resolution/redaction, bot-secret environment isolation, thread/poll workspace persistence, Docker build context rules, Docker base-image customization, Teams thread collection, and Alola command construction.
+The suite covers flag parsing, harness arg ordering, workspace fallback, channel schema validation, per-channel model/concurrency defaults, secret resolution/redaction, bot-secret environment isolation, runner request/cwd validation, thread/poll workspace persistence, Docker build context rules, Docker bot/runner mount separation, Teams thread collection, and Alola command construction.

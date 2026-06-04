@@ -1,5 +1,5 @@
 services:
-  teams-bot:
+  agent-runner:
     environment:
       ALOLA_SSH_KEY_FILE: /run/secrets/alola_ssh_key
     secrets:

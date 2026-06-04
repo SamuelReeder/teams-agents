@@ -1,8 +1,6 @@
-const { spawn } = require("child_process");
 const fs = require("fs");
 const path = require("path");
 const {
-  HARNESS_BIN,
   HARNESS_CONFIG,
   MCP_CONFIG,
   AGENT_TIMEOUT_MS,
@@ -17,7 +15,6 @@ const {
   resolveWorkspace,
   workspaceFromPersisted,
   attachWorkspace,
-  buildHarnessEnv,
 } = require("../config/env");
 const {
   parseAlolaTarget,
@@ -28,6 +25,7 @@ const {
   describeAlolaTarget,
 } = require("../alola/session");
 const { sendToTeams, sendLargeOutput, AI_PREFIX } = require("../teams/io");
+const { runHarness, runnerMode } = require("./harness-runner");
 
 const SESSIONS_DIR = path.join(STATE_DIR || ROOT_DIR, "sessions");
 const ALOLA_WORK_RE = /\b(build|rebuild|compile|test|ctest|smoke|benchmark|bench|perf|gpu|rocm|hipcc|rocminfo|rocm-smi|cmake|ninja|provider verification|verify providers?|runtime)\b/i;
@@ -589,29 +587,16 @@ function spawnAgent(threadInfo, message, replyToId, maxConcurrent = 3) {
 
   const target = threadInfo.alola ? `, target: ${describeAlolaTarget(threadInfo.alola)}` : "";
   console.log(
-    `[Thread ${threadInfo.rootMessageId}] Spawning local (session: ${threadInfo.sessionId.slice(0, 8)}..., workspace: ${workspace.id}, follow-up: ${threadInfo.isFollowUp}${target}, active: ${activeCountFor(threadInfo)}/${maxConcurrent})`
+    `[Thread ${threadInfo.rootMessageId}] Spawning ${runnerMode()} (session: ${threadInfo.sessionId.slice(0, 8)}..., workspace: ${workspace.id}, follow-up: ${threadInfo.isFollowUp}${target}, active: ${activeCountFor(threadInfo)}/${maxConcurrent})`
   );
 
-  const proc = spawn(HARNESS_BIN, harnessArgs, {
+  threadInfo.childPid = null;
+  runHarness(harnessArgs, {
     cwd: workspace.dir,
-    env: buildHarnessEnv({ includeAlola }),
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-
-  threadInfo.childPid = proc.pid;
-  let stdout = "";
-  let stderr = "";
-
-  proc.stdout.on("data", (chunk) => { stdout += chunk.toString(); });
-  proc.stderr.on("data", (chunk) => { stderr += chunk.toString(); });
-
-  const timeout = setTimeout(() => {
-    console.log(`[Thread ${threadInfo.rootMessageId}] Agent timed out, killing`);
-    proc.kill("SIGTERM");
-  }, AGENT_TIMEOUT_MS);
-
-  proc.on("close", (code) => {
-    clearTimeout(timeout);
+    includeAlola,
+    timeoutMs: AGENT_TIMEOUT_MS,
+    onStart: (pid) => { threadInfo.childPid = pid || null; },
+  }).then(({ stdout = "", stderr = "", code = null }) => {
     releaseAgentSlot(threadInfo);
     threadInfo.busy = false;
     threadInfo.childPid = null;
@@ -631,10 +616,7 @@ function spawnAgent(threadInfo, message, replyToId, maxConcurrent = 3) {
 
     sendLargeOutput(threadInfo.chatId, result, replyToId);
     processPending(threadInfo, replyToId, maxConcurrent);
-  });
-
-  proc.on("error", (err) => {
-    clearTimeout(timeout);
+  }).catch((err) => {
     releaseAgentSlot(threadInfo);
     threadInfo.busy = false;
     threadInfo.childPid = null;

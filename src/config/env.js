@@ -301,6 +301,38 @@ const ALOLA_CONFIG = {
 
 const ALOLA_SESSION_BIN = envPath("ALOLA_SESSION_BIN", path.join(ROOT_DIR, "bin/alola-session"));
 const MCP_CONFIG = envPath("MCP_CONFIG", path.join(ROOT_DIR, "mcp/mcp-servers.json"));
+function defaultRunnerAllowedRoots(env = process.env) {
+  const roots = [];
+  const workspaceDir = envString("APP_WORKSPACE_DIR", null, env);
+  if (workspaceDir) roots.push(workspaceDir);
+  roots.push(ROOT_DIR);
+  return roots;
+}
+
+function resolveRunnerAllowedRoots(env = process.env) {
+  const configured = envCsv("AGENT_RUNNER_ALLOWED_ROOTS", "", env);
+  const rawRoots = configured.length ? configured : defaultRunnerAllowedRoots(env);
+  const home = env.HOME || HOME;
+  const roots = [];
+  for (const root of rawRoots) {
+    const resolved = resolveAppPath(root, ROOT_DIR, home);
+    if (resolved && !roots.includes(resolved)) roots.push(resolved);
+  }
+  return roots;
+}
+
+function buildRunnerConfig(env = process.env) {
+  return {
+    url: envString("AGENT_RUNNER_URL", null, env),
+    bindHost: envString("AGENT_RUNNER_BIND_HOST", "127.0.0.1", env),
+    port: parseIntEnv("AGENT_RUNNER_PORT", 3979, env),
+    token: resolveSecretValue("AGENT_RUNNER_TOKEN", { env }),
+    allowedRoots: Object.freeze(resolveRunnerAllowedRoots(env)),
+  };
+}
+
+const RUNNER_CONFIG = Object.freeze(buildRunnerConfig());
+
 const CONFIG_CHANNELS_FILE = CHANNELS_FILE;
 
 function isAccessibleDirectory(dir) {
@@ -564,6 +596,7 @@ module.exports = {
   HARNESS_CONFIG,
   HARNESS_SECRET_ENV,
   HARNESS_VALUE_ENV,
+  RUNNER_CONFIG,
   MCP_CONFIG,
   DEPLOYMENT_HOST,
   AGENT_RUNTIME_HOST,
@@ -588,6 +621,8 @@ module.exports = {
   normalizedSecretName,
   redactSecrets,
   buildHarnessEnv,
+  buildRunnerConfig,
+  resolveRunnerAllowedRoots,
   envString,
   envPath,
   expandHome,

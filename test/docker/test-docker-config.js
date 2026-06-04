@@ -9,6 +9,18 @@ function readText(file) {
   return fs.readFileSync(path.join(ROOT_DIR, file), "utf8");
 }
 
+function serviceBlock(compose, serviceName) {
+  const marker = `  ${serviceName}:\n`;
+  const start = compose.indexOf(marker);
+  assert.notEqual(start, -1, `${serviceName} service missing`);
+  const rest = compose.slice(start + marker.length);
+  const nextService = rest.search(/\n  [A-Za-z0-9_-]+:\n/);
+  const topLevelVolumes = rest.search(/\nvolumes:\n/);
+  const candidates = [nextService, topLevelVolumes].filter((idx) => idx >= 0);
+  const end = candidates.length ? Math.min(...candidates) : rest.length;
+  return compose.slice(start, start + marker.length + end);
+}
+
 function ignoredEntries() {
   return readText(".dockerignore")
     .split(/\r?\n/)
@@ -43,9 +55,34 @@ describe("Docker deployment config", () => {
     assert.equal(entries.includes("config/channels.json"), true);
   });
 
-  it("mounts config/channels.json as the single channel source of truth", () => {
+  it("mounts config/channels.json only into the Teams bot", () => {
     const compose = readText("compose.yaml");
-    assert.ok(compose.includes("./config/channels.json:/app/config/channels.json:ro"));
+    const bot = serviceBlock(compose, "teams-bot");
+    const runner = serviceBlock(compose, "agent-runner");
+
+    assert.ok(bot.includes("./config/channels.json:/app/config/channels.json:ro"));
+    assert.equal(runner.includes("config/channels.json"), false);
+  });
+
+  it("separates bot-only Teams material from runner-only harness material", () => {
+    const compose = readText("compose.yaml");
+    const bot = serviceBlock(compose, "teams-bot");
+    const runner = serviceBlock(compose, "agent-runner");
+
+    assert.ok(bot.includes("TEAMS_SCRIPTS_DIR:"));
+    assert.ok(bot.includes("TEAMS_REPLY_SCRIPT:"));
+    assert.ok(bot.includes("${HOST_HOME_DIR:-${HOME:-teams_home}}:/home/${APP_USER:-teamsbot}"));
+    assert.ok(bot.includes("AGENT_RUNNER_URL:"));
+    assert.equal(bot.includes("${HOST_SECRETS_DIR:-./secrets}:/app/secrets:ro"), false);
+    assert.equal(bot.includes("ALOLA_SSH_KEY_FILE"), false);
+
+    assert.ok(runner.includes("command: [\"node\", \"/app/src/agents/runner-server.js\"]"));
+    assert.ok(runner.includes("${HOST_SECRETS_DIR:-./secrets}:/app/secrets:ro"));
+    assert.ok(runner.includes("${RUNNER_HOME_DIR:-teams_runner_home}:/home/${APP_USER:-teamsbot}"));
+    assert.ok(runner.includes("AGENT_RUNNER_ALLOWED_ROOTS:"));
+    assert.equal(runner.includes("TEAMS_SCRIPTS_DIR:"), false);
+    assert.equal(runner.includes("TEAMS_REPLY_SCRIPT:"), false);
+    assert.equal(runner.includes("${HOST_HOME_DIR:-${HOME:-teams_home}}"), false);
   });
 
   it("does not pass .env wholesale as a second channel source", () => {
@@ -73,7 +110,7 @@ describe("Docker deployment config", () => {
     assert.ok(dockerfile.includes("/app/workspace/repos /app/workspace/worktrees"));
   });
 
-  it("keeps the Alola SSH key mount opt-in", () => {
+  it("keeps the Alola SSH key mount opt-in and runner-owned", () => {
     const compose = readText("compose.yaml");
     const alolaCompose = readText("compose.alola.yaml");
     const dockerfile = readText("Dockerfile");
@@ -81,17 +118,21 @@ describe("Docker deployment config", () => {
     assert.equal(compose.includes("ALOLA_SSH_KEY_FILE"), false);
     assert.equal(compose.includes("source: alola_ssh_key"), false);
     assert.equal(dockerfile.includes("ALOLA_SSH_KEY_FILE=/run/secrets/alola_ssh_key"), false);
+    assert.ok(alolaCompose.includes("agent-runner:"));
+    assert.equal(alolaCompose.includes("teams-bot:"), false);
     assert.ok(alolaCompose.includes("ALOLA_SSH_KEY_FILE: /run/secrets/alola_ssh_key"));
     assert.ok(alolaCompose.includes("source: alola_ssh_key"));
     assert.ok(alolaCompose.includes("file: ${ALOLA_SSH_KEY_SOURCE:?Set ALOLA_SSH_KEY_SOURCE"));
   });
 
-  it("defaults to a portable harness command instead of an HPE home path", () => {
+  it("defaults to a portable runner harness command instead of an HPE home path", () => {
     const compose = readText("compose.yaml");
-    assert.ok(compose.includes("HARNESS_BIN: ${HARNESS_BIN:-omp}"));
+    const runner = serviceBlock(compose, "agent-runner");
+
+    assert.ok(runner.includes("HARNESS_BIN: ${HARNESS_BIN:-omp}"));
     assert.equal(compose.includes("/home/${APP_USER:-sareeder}/.local/bin/omp"), false);
-    assert.ok(compose.includes("PI_STREAM_FIRST_EVENT_TIMEOUT_MS: ${PI_STREAM_FIRST_EVENT_TIMEOUT_MS:-600000}"));
-    assert.ok(compose.includes("PI_STREAM_IDLE_TIMEOUT_MS: ${PI_STREAM_IDLE_TIMEOUT_MS:-600000}"));
+    assert.ok(runner.includes("PI_STREAM_FIRST_EVENT_TIMEOUT_MS: ${PI_STREAM_FIRST_EVENT_TIMEOUT_MS:-600000}"));
+    assert.ok(runner.includes("PI_STREAM_IDLE_TIMEOUT_MS: ${PI_STREAM_IDLE_TIMEOUT_MS:-600000}"));
   });
 
   it("runs with the configured uid/gid and home-local harness paths on PATH", () => {
@@ -108,6 +149,11 @@ describe("Docker deployment config", () => {
     for (const key of [
       "TEAMS_SCRIPTS_DIR:",
       "TEAMS_REPLY_SCRIPT:",
+      "AGENT_RUNNER_URL:",
+      "AGENT_RUNNER_BIND_HOST:",
+      "AGENT_RUNNER_PORT:",
+      "AGENT_RUNNER_TOKEN:",
+      "AGENT_RUNNER_ALLOWED_ROOTS:",
       "HARNESS_DEFAULT_MODEL:",
       "HARNESS_PROMPT_FLAG:",
       "HARNESS_SESSION_FLAG:",
@@ -134,9 +180,16 @@ describe("Docker deployment config", () => {
 
   it("uses explicit Docker defaults for mounts and dashboard exposure", () => {
     const compose = readText("compose.yaml");
-    assert.ok(compose.includes("${HOST_SECRETS_DIR:-./secrets}:/app/secrets:ro"));
-    assert.ok(compose.includes("${HOST_WORKSPACE_DIR:-teams_workspace}:${APP_WORKSPACE_DIR:-/app/workspace}"));
-    assert.ok(compose.includes("${HOST_HOME_DIR:-${HOME:-teams_home}}:/home/${APP_USER:-teamsbot}"));
-    assert.ok(compose.includes("${HOST_BIND_ADDR:-127.0.0.1}:${PORT:-3978}:3978"));
+    const bot = serviceBlock(compose, "teams-bot");
+    const runner = serviceBlock(compose, "agent-runner");
+
+    assert.ok(runner.includes("${HOST_SECRETS_DIR:-./secrets}:/app/secrets:ro"));
+    assert.ok(bot.includes("${HOST_WORKSPACE_DIR:-teams_workspace}:${APP_WORKSPACE_DIR:-/app/workspace}"));
+    assert.ok(runner.includes("${HOST_WORKSPACE_DIR:-teams_workspace}:${APP_WORKSPACE_DIR:-/app/workspace}"));
+    assert.ok(bot.includes("${HOST_HOME_DIR:-${HOME:-teams_home}}:/home/${APP_USER:-teamsbot}"));
+    assert.ok(runner.includes("${RUNNER_HOME_DIR:-teams_runner_home}:/home/${APP_USER:-teamsbot}"));
+    assert.ok(bot.includes("${HOST_BIND_ADDR:-127.0.0.1}:${PORT:-3978}:3978"));
+    assert.equal(runner.includes("ports:"), false);
+    assert.match(compose, /^  teams_runner_home:$/m);
   });
 });

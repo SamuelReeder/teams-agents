@@ -125,12 +125,14 @@ describe("harness environment exposure", () => {
         TEAMS_REFRESH_TOKEN: "refresh-token",
         TEAMS_ACCESS_TOKEN: "teams-token",
         MICROSOFT_CLIENT_SECRET: "client-secret",
+        AGENT_RUNNER_TOKEN: "runner-token",
       },
     });
 
     assert.equal(env.TEAMS_REFRESH_TOKEN, undefined);
     assert.equal(env.TEAMS_ACCESS_TOKEN, undefined);
     assert.equal(env.MICROSOFT_CLIENT_SECRET, undefined);
+    assert.equal(env.AGENT_RUNNER_TOKEN, undefined);
   });
 
   it("redacts direct secret values and secret file paths", () => {

@@ -77,7 +77,7 @@ ENV NODE_ENV=production \
     HARNESS_APPEND_SYSTEM_PROMPT=1 \
     HARNESS_SKIP_PERMISSIONS=1
 
-EXPOSE 3978
+EXPOSE 3978 3979
 
 ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["node", "/app/src/index.js"]

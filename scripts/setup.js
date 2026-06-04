@@ -8,6 +8,7 @@ const {
   REPLY_SCRIPT,
   CHANNELS_FILE,
   ROOT_DIR,
+  RUNNER_CONFIG,
   teamsScriptPath,
   buildHarnessEnv,
   loadChannels,
@@ -46,6 +47,7 @@ function pushWarning(warnings, message) {
 }
 
 function validateHarness(errors) {
+  if (RUNNER_CONFIG.url) return;
   if (!HARNESS_BIN) {
     pushError(errors, "HARNESS_BIN is empty and no harness executable was discovered");
     return;
@@ -109,6 +111,7 @@ function alolaKeyConfigured() {
 }
 
 function validateAlolaSecrets(errors, warnings) {
+  if (RUNNER_CONFIG.url) return;
   if (!alolaKeyConfigured()) {
     pushWarning(warnings, "ALOLA_SSH_KEY is not configured; Alola routing will fail until a readable key path or secret file is provided.");
     return;
@@ -126,6 +129,7 @@ function validateAlolaSecrets(errors, warnings) {
 }
 
 function validateHarnessSecrets(errors) {
+  if (RUNNER_CONFIG.url) return;
   for (const name of HARNESS_SECRET_ENV) {
     if (!process.env[`${name}_FILE`]) continue;
     try {

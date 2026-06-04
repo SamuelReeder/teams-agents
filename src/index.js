@@ -5,6 +5,7 @@ const {
   POLL_INTERVAL,
   HARNESS_BIN,
   HARNESS_CONFIG,
+  RUNNER_CONFIG,
   AGENT_TIMEOUT_MS,
   MAX_CONCURRENT_AGENTS,
   loadChannels,
@@ -142,7 +143,7 @@ app.get("/", (req, res) => {
 
 app.listen(PORT, BIND_HOST, () => {
   console.log(`Teams agents server on http://${BIND_HOST}:${PORT}`);
-  console.log(`Harness: ${redactSecrets(HARNESS_BIN)}`);
+  console.log(RUNNER_CONFIG.url ? `Harness runner: ${redactSecrets(RUNNER_CONFIG.url)}` : `Harness: ${redactSecrets(HARNESS_BIN)}`);
   console.log(`Default model: ${HARNESS_CONFIG.defaultModel || "(none)"}`);
   console.log(`Alola default model: ${HARNESS_CONFIG.alolaDefaultModel || "(none)"}`);
   console.log(`Poll interval: ${POLL_INTERVAL}ms | Max concurrent agents: ${MAX_CONCURRENT_AGENTS} | Agent timeout: ${(AGENT_TIMEOUT_MS / 60000).toFixed(0)}m`);

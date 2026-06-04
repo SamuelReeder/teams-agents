@@ -4,7 +4,6 @@ const path = require("path");
 const {
   ROOT_DIR,
   STATE_DIR,
-  HARNESS_BIN,
   AGENT_TIMEOUT_MS,
   loadChannels,
   resolveWorkspace,
@@ -13,10 +12,10 @@ const {
   channelDefaultModel,
   channelAlolaDefaultModel,
   channelMaxConcurrentAgents,
-  buildHarnessEnv,
 } = require("../config/env");
 const { sendToTeams } = require("../teams/io");
 const { buildSessionMetadata, coerceAlolaMetadata } = require("../alola/session");
+const { runHarness } = require("../agents/harness-runner");
 
 const POLLS_FILE = path.join(STATE_DIR || ROOT_DIR, "polls.json");
 const DEFAULT_MAX_RUNS = 20;
@@ -328,7 +327,6 @@ function runPoll(poll) {
 
   console.log(`[Poll ${poll.id}] Run ${poll.runCount}/${poll.maxRuns}: "${poll.prompt.slice(0, 60)}"`);
 
-  const { spawn } = require("child_process");
 
   const threadInfo = poll.fresh
     ? attachWorkspace({
@@ -359,31 +357,12 @@ function runPoll(poll) {
   );
   savePollsToDisk();
   const includeAlola = Boolean(agentSpawn.defaultModelForPrompt(threadInfo, poll.prompt) && threadInfo.alola) || agentSpawn.promptNeedsAlola(poll.prompt) || Boolean(threadInfo.alola);
-  let proc;
-  try {
-    proc = spawn(HARNESS_BIN, args, {
-      cwd: workspace.dir,
-      env: buildHarnessEnv({ includeAlola }),
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-  } catch (err) {
-    agentSpawn.releaseAgentSlot(poll);
-    poll.busy = false;
-    throw err;
-  }
 
-  let stdout = "";
-  let stderr = "";
-
-  proc.stdout.on("data", (chunk) => { stdout += chunk.toString(); });
-  proc.stderr.on("data", (chunk) => { stderr += chunk.toString(); });
-
-  const timeout = setTimeout(() => {
-    proc.kill("SIGTERM");
-  }, AGENT_TIMEOUT_MS);
-
-  proc.on("close", (code) => {
-    clearTimeout(timeout);
+  runHarness(args, {
+    cwd: workspace.dir,
+    includeAlola,
+    timeoutMs: AGENT_TIMEOUT_MS,
+  }).then(({ stdout = "", stderr = "", code = null }) => {
     poll.busy = false;
     agentSpawn.releaseAgentSlot(poll);
 
@@ -414,12 +393,11 @@ function runPoll(poll) {
 
     savePollsToDisk();
     scheduleNextTick();
-  });
-
-  proc.on("error", () => {
-    clearTimeout(timeout);
+  }).catch((err) => {
     poll.busy = false;
     agentSpawn.releaseAgentSlot(poll);
+    console.error(`[Poll ${poll.id}] Harness run failed:`, err.message);
+    savePollsToDisk();
     scheduleNextTick();
   });
 }

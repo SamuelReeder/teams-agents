@@ -8,7 +8,6 @@ const {
   THREAD_TTL_MS,
   AGENT_PREFIX,
   ALOLA_SESSION_BIN,
-  HARNESS_BIN,
   HARNESS_CONFIG,
   loadChannels,
   resolveWorkspace,
@@ -22,6 +21,7 @@ const { sendToTeams, stripHtml, escapeHtml, isBotMessage, isAgentResponse, fetch
 const { spawnAgent, finalizeSession, existingThreadSessionDir } = require("../agents/spawn");
 const { coerceAlolaMetadata } = require("../alola/session");
 const { createPoll, cancelPoll, restartPoll, getPollForResultThread, getPollsForChat, hasPollResultThread } = require("../polls/polls");
+const { listHarnessModels } = require("../agents/harness-runner");
 
 const THREADS_FILE = path.join(STATE_DIR || ROOT_DIR, "threads.json");
 
@@ -309,23 +309,21 @@ function handleCommand(channel, text, from, replyToId) {
       sendToTeams(chatId, "Model listing is not supported by the configured harness.", replyToId);
       return true;
     }
-    const { execFileSync } = require("child_process");
     const search = text.trim() === "!models" ? "" : text.slice("!models ".length).trim();
-    const args = search ? [`${listModelsFlag}=${search}`] : [listModelsFlag];
-    try {
-      const out = execFileSync(HARNESS_BIN, args, {
-        timeout: 30000,
-        stdio: ["ignore", "pipe", "pipe"],
-      }).toString();
-      const lines = out.split("\n").filter((l) => l.trim()).slice(0, 80);
+    const workspace = workspaceForChannel(channel);
+    listHarnessModels(search, {
+      cwd: workspace.dir,
+      timeoutMs: 30000,
+    }).then(({ stdout = "" }) => {
+      const lines = stdout.split("\n").filter((l) => l.trim()).slice(0, 80);
       const filterNote = search ? ` (filter: <code>${search}</code>)` : "";
       sendToTeams(chatId,
         `<b>Available models${filterNote}</b><br><pre>${lines.join("\n")}</pre>`,
         replyToId
       );
-    } catch (err) {
+    }).catch((err) => {
       sendToTeams(chatId, `Failed to list models: ${err.message}`, replyToId);
-    }
+    });
     return true;
   }
 
