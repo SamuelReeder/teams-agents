@@ -8,7 +8,7 @@ const {
   REPLY_SCRIPT,
   CHANNELS_FILE,
   ROOT_DIR,
-  SCRIPTS_DIR,
+  teamsScriptPath,
   buildHarnessEnv,
   loadChannels,
   redactSecrets,
@@ -59,8 +59,10 @@ function validateHarness(errors) {
 
 function validateTeamsScripts(errors) {
   const required = [
-    path.join(SCRIPTS_DIR, "list_messages.py"),
-    path.join(SCRIPTS_DIR, "send_chat.py"),
+    teamsScriptPath("auth.py"),
+    teamsScriptPath("list_chats.py"),
+    teamsScriptPath("list_messages.py"),
+    teamsScriptPath("send_chat.py"),
     REPLY_SCRIPT,
   ];
   for (const file of required) {
