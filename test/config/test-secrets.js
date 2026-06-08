@@ -135,6 +135,29 @@ describe("harness environment exposure", () => {
     assert.equal(env.AGENT_RUNNER_TOKEN, undefined);
   });
 
+  it("passes thread-scoped Alola session identity only for Alola-routed harnesses", () => {
+    const localEnv = buildHarnessEnv({
+      includeAlola: false,
+      alolaThreadId: "thread-123",
+      env: { PATH: "/usr/bin" },
+    });
+    assert.equal(localEnv.ALOLA_THREAD_ID, undefined);
+
+    const alolaEnv = buildHarnessEnv({
+      includeAlola: true,
+      alolaThreadId: "thread-123",
+      env: { PATH: "/usr/bin" },
+    });
+    assert.equal(alolaEnv.ALOLA_THREAD_ID, "thread-123");
+
+    const unsafeEnv = buildHarnessEnv({
+      includeAlola: true,
+      alolaThreadId: "bad thread id with spaces",
+      env: { PATH: "/usr/bin" },
+    });
+    assert.equal(unsafeEnv.ALOLA_THREAD_ID, undefined);
+  });
+
   it("redacts direct secret values and secret file paths", () => {
     const root = tempDir();
     const secretFile = writeSecret(root, "key", "value");

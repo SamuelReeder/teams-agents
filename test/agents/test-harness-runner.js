@@ -80,6 +80,7 @@ describe("agent runner HTTP path", () => {
             args,
             cwd: options.cwd,
             includeAlola: options.includeAlola,
+            alolaThreadId: options.alolaThreadId,
             timeoutMs: options.timeoutMs,
           }),
           stderr: "",
@@ -93,6 +94,7 @@ describe("agent runner HTTP path", () => {
         cwd,
         includeAlola: true,
         runnerConfig: { url, token: "shared-token" },
+        alolaThreadId: "thread-abc",
         timeoutMs: 1234,
       });
       const payload = JSON.parse(result.stdout);
@@ -102,6 +104,7 @@ describe("agent runner HTTP path", () => {
       assert.deepEqual(payload.args, ["--flag", "value"]);
       assert.equal(payload.cwd, fs.realpathSync(cwd));
       assert.equal(payload.includeAlola, true);
+      assert.equal(payload.alolaThreadId, "thread-abc");
       assert.equal(payload.timeoutMs, 1234);
     } finally {
       await close(server);

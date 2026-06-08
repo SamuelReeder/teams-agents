@@ -320,18 +320,18 @@ docker compose -f compose.yaml -f compose.alola.yaml run --rm teams-bot npm run 
 docker compose -f compose.yaml -f compose.alola.yaml up -d --build
 ```
 
-The app-level CLI is `bin/alola-session` and is also exposed as the package binary `alola-session`. In runner mode the harness invokes it inside `agent-runner`.
+The app-level CLI is `bin/alola-session` and is also exposed as the package binary `alola-session`. In runner mode the harness invokes it inside `agent-runner`. Teams-routed agents receive `ALOLA_THREAD_ID` so CLI calls without `--thread` are scoped to the Teams thread; manual debugging should pass an explicit `--thread` value to avoid reusing the shared `manual` session.
 
 Examples:
 
 ```bash
-bin/alola-session run -- 'hostname && pwd && command -v hipcc'
-bin/alola-session run --target 04 -- 'hostname'
-bin/alola-session run --target gfx942 -- 'rocminfo'
-bin/alola-session run --target gpu:gfx90a -- 'rocminfo'
-bin/alola-session status --target gfx942
-bin/alola-session attach --target gfx942
-bin/alola-session stop --target gfx942
+bin/alola-session run --thread manual-check -- 'hostname && pwd && command -v hipcc'
+bin/alola-session run --thread manual-check --target 04 -- 'hostname'
+bin/alola-session run --thread manual-gfx942 --target gfx942 -- 'rocminfo'
+bin/alola-session run --thread manual-gfx90a --target gpu:gfx90a -- 'rocminfo'
+bin/alola-session status --thread manual-gfx942 --target gfx942
+bin/alola-session attach --thread manual-gfx942 --target gfx942
+bin/alola-session stop --thread manual-gfx942 --target gfx942
 ```
 
 `--alola` in Teams messages is consumed by the bot and is not forwarded to the harness. It records a durable remote execution target for that Teams thread. Build/test/runtime prompts can also infer Alola routing from the prompt; the injected routing context tells the agent to use the app-level CLI from inside `agent-runner`.

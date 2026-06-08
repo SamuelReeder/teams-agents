@@ -554,6 +554,11 @@ function copyEnvNames(out, names, env = process.env) {
   }
 }
 
+function safeHarnessThreadId(value) {
+  const id = String(value || "").trim();
+  return /^[A-Za-z0-9_.:-]{1,128}$/.test(id) ? id : null;
+}
+
 function buildHarnessEnv(options = {}) {
   const source = options.env || process.env;
   const out = {};
@@ -566,9 +571,12 @@ function buildHarnessEnv(options = {}) {
     if (value) out[name] = value;
   }
 
+
   if (options.includeAlola) {
     copyEnvNames(out, ALOLA_ENV_KEYS, source);
     out.ALOLA_SESSION_BIN = ALOLA_SESSION_BIN;
+    const threadId = safeHarnessThreadId(options.alolaThreadId);
+    if (threadId) out.ALOLA_THREAD_ID = threadId;
     if (ALOLA_CONFIG.sshKey) out.ALOLA_SSH_KEY = ALOLA_CONFIG.sshKey;
   }
 
@@ -623,6 +631,7 @@ module.exports = {
   buildHarnessEnv,
   buildRunnerConfig,
   resolveRunnerAllowedRoots,
+  safeHarnessThreadId,
   envString,
   envPath,
   expandHome,

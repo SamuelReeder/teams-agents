@@ -119,6 +119,7 @@ async function executeHarnessPayload(payload, config = RUNNER_CONFIG, executor =
   return executor(payload.args, {
     cwd,
     includeAlola: Boolean(payload.includeAlola),
+    alolaThreadId: payload.alolaThreadId,
     timeoutMs: normalizedTimeoutMs(payload.timeoutMs),
   });
 }

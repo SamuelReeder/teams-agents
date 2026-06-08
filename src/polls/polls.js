@@ -361,6 +361,7 @@ function runPoll(poll) {
   runHarness(args, {
     cwd: workspace.dir,
     includeAlola,
+    alolaThreadId: threadInfo.sessionId,
     timeoutMs: AGENT_TIMEOUT_MS,
   }).then(({ stdout = "", stderr = "", code = null }) => {
     poll.busy = false;

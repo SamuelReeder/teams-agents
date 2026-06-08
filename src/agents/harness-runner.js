@@ -26,7 +26,10 @@ function runLocalHarness(args, options = {}) {
   assertStringArray(args);
   const cwd = options.cwd || process.cwd();
   const timeoutMs = normalizedTimeoutMs(options.timeoutMs, 0);
-  const env = options.env || buildHarnessEnv({ includeAlola: Boolean(options.includeAlola) });
+  const env = options.env || buildHarnessEnv({
+    includeAlola: Boolean(options.includeAlola),
+    alolaThreadId: options.alolaThreadId,
+  });
   const bin = options.bin || HARNESS_BIN;
 
   return new Promise((resolve, reject) => {
@@ -138,6 +141,7 @@ async function runRemoteHarness(args, options = {}) {
     cwd: options.cwd || process.cwd(),
     includeAlola: Boolean(options.includeAlola),
     timeoutMs: normalizedTimeoutMs(options.timeoutMs),
+    alolaThreadId: options.alolaThreadId || null,
   };
   const result = await postRunner("/v1/harness/run", payload, options);
   return { ...result, mode: "agent-runner" };

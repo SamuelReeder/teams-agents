@@ -50,6 +50,19 @@ function existingDir(dir) {
 function workspaceRelative(workspace, suffix) {
   return path.join(workspace.dir, suffix);
 }
+function shellQuote(value) {
+  return `'${String(value).replace(/'/g, "'\\''")}'`;
+}
+
+function alolaThreadIdFor(threadInfo = null) {
+  return String(threadInfo?.sessionId || threadInfo?.rootMessageId || "").trim();
+}
+
+function alolaThreadFlag(threadInfo = null) {
+  const id = alolaThreadIdFor(threadInfo);
+  return id ? ` --thread ${shellQuote(id)}` : "";
+}
+
 
 function getProjectDirs(workspace = null) {
   const ws = workspace || resolveWorkspace();
@@ -76,6 +89,7 @@ function buildRoutingContext(threadInfo = null) {
   const hasRepos = existingDir(reposDir);
   const hasWorktrees = existingDir(worktreesDir);
   const alolaCommand = ALOLA_SESSION_BIN;
+  const threadFlag = alolaThreadFlag(threadInfo);
   const lines = [
     "## Environment",
     `Controller host: **${AGENT_RUNTIME_HOST || os.hostname()}** (${os.platform()}, ${os.arch()}). Deployment host: **${DEPLOYMENT_HOST || AGENT_RUNTIME_HOST || os.hostname()}**. Home: \`${os.homedir()}\``,
@@ -83,8 +97,8 @@ function buildRoutingContext(threadInfo = null) {
     "",
     "## Execution routing",
     "- The harness process runs locally on the controller host by default. Use local state for ordinary code reading, editing, review, planning, and research.",
-    `- For build/test/benchmark/runtime work, use \`${alolaCommand} run -- <command>\`; default Alola target is login node ${ALOLA_CONFIG.defaultLoginNode} (${ALOLA_CONFIG.defaultAsic}).`,
-    `- For a non-login GPU allocation, use \`${alolaCommand} run --target <asic> -- <command>\`; the default constraint is ${ALOLA_CONFIG.defaultConstraintPrefix || "<ASIC>"}&<ASIC_UPPER> and the image template is \`${ALOLA_CONFIG.imageTemplate}\`.`,
+    `- For build/test/benchmark/runtime work, use \`${alolaCommand} run${threadFlag} -- <command>\`; default Alola target is login node ${ALOLA_CONFIG.defaultLoginNode} (${ALOLA_CONFIG.defaultAsic}).`,
+    `- For a non-login GPU allocation, use \`${alolaCommand} run${threadFlag} --target <asic> -- <command>\`; the default constraint is ${ALOLA_CONFIG.defaultConstraintPrefix || "<ASIC>"}&<ASIC_UPPER> and the image template is \`${ALOLA_CONFIG.imageTemplate}\`.`,
     `- For login-node enroot work, home/project paths and ${ALOLA_CONFIG.imageTemplate} are shared, but named enroot rootfses such as ${ALOLA_CONFIG.defaultLoginContainer} are node-local under /var/tmp. If a login node lacks the rootfs, recreate it from the shared image instead of switching nodes permanently.`,
     "- Do not run ROCm builds, CMake/Ninja, ctest, benchmarks, provider verification, GPU runtime checks, hipcc, rocminfo, or rocm-smi directly on the controller host.",
     "- If Alola verification is requested for a branch or patch, do not skip because the default Alola checkout is dirty, on another branch, or at a different path. Fetch/checkout the requested branch on Alola, or create an isolated Alola worktree and run from that path.",
@@ -381,13 +395,14 @@ function buildPromptWithExecutionContext(threadInfo, prompt) {
 
   const target = targetArg(inferredTarget);
   const targetFlag = target === "default" ? "" : ` --target ${target}`;
+  const threadFlag = alolaThreadFlag(threadInfo);
   const workspace = workspaceForThread(threadInfo);
   const lines = [
     "[Execution routing]",
     "The harness stays local to the controller host. Run ROCm build/test/benchmark/runtime commands through a durable Alola session, not directly on the controller host.",
     `Harness working directory: ${workspace.dir}`,
     `Target: ${describeAlolaTarget(inferredTarget)}.`,
-    `Use \`${ALOLA_SESSION_BIN} run${targetFlag} -- <command>\` for CMake/Ninja/ctest/hipcc/rocminfo/rocm-smi/provider-verification work.`,
+    `Use \`${ALOLA_SESSION_BIN} run${threadFlag}${targetFlag} -- <command>\` for CMake/Ninja/ctest/hipcc/rocminfo/rocm-smi/provider-verification work.`,
     `Alola home/project paths and images are shared, but login-node enroot rootfses such as ${inferredTarget.container || ALOLA_CONFIG.defaultLoginContainer} are node-local under /var/tmp; if \`enroot list\` lacks the target container, recreate it from the shared image and retry.`,
     "Do not assume workspace-local repos or worktrees are mounted inside Alola sessions.",
     "Do not skip requested Alola verification because the default Alola checkout is dirty, on another branch, or at a different path; fetch/checkout the requested branch or create an isolated Alola worktree, then run from that path.",
@@ -594,6 +609,7 @@ function spawnAgent(threadInfo, message, replyToId, maxConcurrent = 3) {
   runHarness(harnessArgs, {
     cwd: workspace.dir,
     includeAlola,
+    alolaThreadId: alolaThreadIdFor(threadInfo),
     timeoutMs: AGENT_TIMEOUT_MS,
     onStart: (pid) => { threadInfo.childPid = pid || null; },
   }).then(({ stdout = "", stderr = "", code = null }) => {

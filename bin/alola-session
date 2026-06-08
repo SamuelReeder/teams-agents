@@ -39,7 +39,7 @@ Targets:
 
 function parseArgs(argv) {
   const command = argv[2] || "help";
-  const opts = { target: [], thread: "manual", timeoutMs: null, command: "" };
+  const opts = { target: [], thread: process.env.ALOLA_THREAD_ID || "manual", timeoutMs: null, command: "" };
   let i = 3;
   while (i < argv.length) {
     const arg = argv[i];

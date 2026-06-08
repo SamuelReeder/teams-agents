@@ -213,6 +213,7 @@ describe("buildHarnessArgs", () => {
     const prompt = args[promptIndex + (promptFlag ? 1 : 0)];
     assert.ok(prompt.includes("[Execution routing]"));
     assert.ok(prompt.includes(`${ALOLA_SESSION_BIN} run`));
+    assert.ok(prompt.includes("--thread 'session-build'"));
   });
 
   it("routes smoke prompts through Alola", () => {
@@ -280,6 +281,7 @@ describe("buildHarnessArgs", () => {
     const promptIndex = promptFlag ? args.lastIndexOf(promptFlag) : args.length - 1;
     const prompt = args[promptIndex + (promptFlag ? 1 : 0)];
     assert.ok(prompt.includes("Alola GPU gfx942"));
+    assert.ok(prompt.includes("--thread 'session-target' --target gfx942"));
     assert.equal(args.includes("--alola"), false);
   });
 });
