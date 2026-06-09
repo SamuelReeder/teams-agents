@@ -1,0 +1,20 @@
+node_modules/
+.env
+.env.*
+
+# Runtime state/logs/secrets
+bot-message-ids.json
+/channels.json
+/config/channels.json
+polls.json
+threads.json
+/sessions/
+/state/
+/logs/
+/secrets/
+*.pem
+*.key
+id_rsa
+id_ed25519
+/workspace/
+*.log

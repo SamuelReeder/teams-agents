@@ -1,0 +1,12 @@
+services:
+  agent-runner:
+    environment:
+      ALOLA_SSH_KEY_FILE: /run/secrets/remote_ssh_key
+    secrets:
+      - source: remote_ssh_key
+        target: remote_ssh_key
+        mode: 0400
+
+secrets:
+  remote_ssh_key:
+    file: ${ALOLA_SSH_KEY_SOURCE:?Set ALOLA_SSH_KEY_SOURCE to the host path of your remote SSH private key}

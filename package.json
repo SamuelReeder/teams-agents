@@ -1,0 +1,21 @@
+{
+  "name": "teams-bot",
+  "version": "1.0.0",
+  "description": "Teams bot that dispatches Claude Code agents",
+  "main": "src/index.js",
+  "bin": {
+    "alola-session": "bin/alola-session"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "setup:check": "node scripts/setup.js --check",
+    "test": "node --test test/*/*.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "express": "^4.21.0",
+    "marked": "^18.0.3"
+  }
+}
