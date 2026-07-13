@@ -28,7 +28,7 @@ services:
       APP_WORKSPACE_DIR: ${APP_WORKSPACE_DIR:-/app/workspace}
       TEAMS_SCRIPTS_DIR: ${TEAMS_SCRIPTS_DIR:-${TEAMS_SCRIPT_DIR:-/home/${APP_USER:-teamsbot}/.claude/skills/m365-teams/scripts}}
       TEAMS_REPLY_SCRIPT: /app/scripts/teams/reply.py
-      AGENT_RUNNER_URL: ${AGENT_RUNNER_URL:-http://agent-runner:${AGENT_RUNNER_PORT:-3979}}
+      AGENT_RUNNER_URL: ${AGENT_RUNNER_URL-http://agent-runner:${AGENT_RUNNER_PORT:-3979}}
       AGENT_RUNNER_TOKEN: ${AGENT_RUNNER_TOKEN:-}
       HARNESS_BASE_ARGS: ${HARNESS_BASE_ARGS:---print}
       HARNESS_APPEND_SYSTEM_PROMPT: ${HARNESS_APPEND_SYSTEM_PROMPT:-1}
